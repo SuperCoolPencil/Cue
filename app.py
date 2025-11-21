@@ -17,12 +17,15 @@ try:
     from core.utils import format_time, get_media_files, format_remaining, get_folder_stats
     from drivers import play_media
 except ImportError:
+    # Mocking imports for the sake of the script running if core is missing
+    # In production, keep the original error handling
     st.error("Core modules missing.")
     st.stop()
 
 PAGE_TITLE = "Cue"
 PAGE_ICON = "⏯️"
 
+# === UPDATED CSS ===
 MODERN_CSS = """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
@@ -74,101 +77,28 @@ MODERN_CSS = """
         border: 1px solid rgba(139, 92, 246, 0.2);
         border-radius: 16px;
         padding: 18px 20px;
-        margin-bottom: 12px;
+        margin-bottom: 0px; /* Removed bottom margin as buttons are now adjacent */
         box-shadow: 
             0 8px 32px -8px rgba(139, 92, 246, 0.3),
             0 0 0 1px rgba(255, 255, 255, 0.05) inset;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         position: relative;
         overflow: hidden;
+        height: 100%; /* Fill column height */
     }
     
-    .cue-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: -100%;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(90deg, transparent, rgba(167, 139, 250, 0.1), transparent);
-        transition: left 0.5s;
-    }
-    
-    .cue-card:hover {
-        border-color: rgba(167, 139, 250, 0.5);
-        transform: translateY(-2px);
-        box-shadow: 
-            0 16px 48px -8px rgba(139, 92, 246, 0.5),
-            0 0 0 1px rgba(167, 139, 250, 0.2) inset;
-    }
-    
-    .cue-card:hover::before {
-        left: 100%;
-    }
-    
-    /* === CARD HEADER === */
-    .card-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 12px;
-        margin-bottom: 12px;
-    }
-    
+    /* === CARD CONTENT === */
     .card-title {
         font-size: 1.1rem;
         font-weight: 700;
         color: #fafafa;
         line-height: 1.3;
-        flex: 1;
+        margin-bottom: 8px;
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
         text-overflow: ellipsis;
-    }
-    
-    .card-actions {
-        display: flex;
-        gap: 6px;
-        flex-shrink: 0;
-    }
-    
-    .action-btn {
-        padding: 8px 16px;
-        border-radius: 10px;
-        font-size: 0.85rem;
-        font-weight: 600;
-        border: 1px solid rgba(139, 92, 246, 0.3);
-        background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(109, 40, 217, 0.1));
-        color: #e4e4e7;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        white-space: nowrap;
-        text-decoration: none;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-    }
-    
-    .action-btn:hover {
-        border-color: rgba(167, 139, 250, 0.6);
-        background: linear-gradient(135deg, rgba(139, 92, 246, 0.3), rgba(109, 40, 217, 0.2));
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px -2px rgba(139, 92, 246, 0.4);
-    }
-    
-    .action-btn.delete {
-        padding: 8px 12px;
-        background: rgba(239, 68, 68, 0.1);
-        border-color: rgba(239, 68, 68, 0.3);
-        color: #fca5a5;
-    }
-    
-    .action-btn.delete:hover {
-        background: rgba(239, 68, 68, 0.2);
-        border-color: rgba(239, 68, 68, 0.5);
-        box-shadow: 0 4px 12px -2px rgba(239, 68, 68, 0.4);
     }
     
     /* === BADGES === */
@@ -214,12 +144,6 @@ MODERN_CSS = """
         background: linear-gradient(135deg, rgba(52, 211, 153, 0.2), rgba(16, 185, 129, 0.15));
         color: #6ee7b7;
         border: 1px solid rgba(52, 211, 153, 0.3);
-        animation: pulse 2s ease-in-out infinite;
-    }
-    
-    @keyframes pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.7; }
     }
     
     /* === STATS ROW === */
@@ -240,27 +164,33 @@ MODERN_CSS = """
         text-shadow: 0 0 20px rgba(251, 191, 36, 0.3);
     }
     
-    /* === BUTTONS (for sidebar) === */
-    button[kind="secondary"], button[kind="primary"] {
-        border-radius: 12px !important;
+    /* === NATIVE BUTTON STYLING === */
+    /* Override Streamlit buttons to match the custom look */
+    div.stButton > button {
+        width: 100%;
+        border-radius: 10px !important;
+        font-size: 0.85rem !important;
         font-weight: 600 !important;
-        font-size: 0.875rem !important;
-        padding: 0.65rem 1.25rem !important;
         border: 1px solid rgba(139, 92, 246, 0.3) !important;
-        background: linear-gradient(135deg, rgba(30, 27, 75, 0.6), rgba(25, 20, 45, 0.8)) !important;
+        background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(109, 40, 217, 0.1)) !important;
         color: #e4e4e7 !important;
         transition: all 0.2s ease !important;
-        box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.3) !important;
+        margin-top: 2px;
     }
-    
-    button[kind="secondary"]:hover, button[kind="primary"]:hover {
+
+    div.stButton > button:hover {
         border-color: rgba(167, 139, 250, 0.6) !important;
         background: linear-gradient(135deg, rgba(139, 92, 246, 0.3), rgba(109, 40, 217, 0.2)) !important;
-        color: #fafafa !important;
-        transform: translateY(-2px) !important;
-        box-shadow: 0 8px 20px -4px rgba(139, 92, 246, 0.4) !important;
+        transform: translateY(-1px);
+        color: white !important;
+        box-shadow: 0 4px 12px -2px rgba(139, 92, 246, 0.4) !important;
     }
     
+    /* Delete/Confirm specific styling overrides */
+    /* We can't easily target specific buttons in CSS without keys, 
+       but we can make all secondary (outline) buttons reddish if we wanted.
+       For now, we keep the purple theme but standard layout. */
+
     /* === INPUTS === */
     div[data-baseweb="input"], .stTextInput input {
         background: rgba(24, 24, 27, 0.6) !important;
@@ -270,52 +200,18 @@ MODERN_CSS = """
         color: #fafafa !important;
         padding: 0.75rem 1rem !important;
         font-size: 0.9rem !important;
-        transition: all 0.2s ease !important;
-    }
-    
-    div[data-baseweb="input"]:focus-within, .stTextInput input:focus {
-        border-color: rgba(139, 92, 246, 0.6) !important;
-        box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1) !important;
-        outline: none !important;
     }
     
     /* === SIDEBAR === */
     section[data-testid="stSidebar"] {
         background: linear-gradient(180deg, rgba(12, 12, 14, 0.95) 0%, rgba(10, 10, 15, 0.98) 100%) !important;
-        backdrop-filter: blur(20px) !important;
         border-right: 1px solid rgba(63, 63, 70, 0.3) !important;
     }
-    
-    section[data-testid="stSidebar"] .stMarkdown h3 {
-        color: #e4e4e7;
-        font-weight: 700;
-        font-size: 0.875rem;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        margin-bottom: 1rem;
-        padding-bottom: 0.5rem;
-        border-bottom: 1px solid rgba(139, 92, 246, 0.2);
-    }
-    
-    /* === SPACING === */
-    .element-container { margin-bottom: 0.5rem; }
-    
-    /* === INFO MESSAGES === */
-    .stAlert {
-        background: rgba(59, 130, 246, 0.1) !important;
-        border: 1px solid rgba(59, 130, 246, 0.3) !important;
-        border-radius: 12px !important;
-        color: #93c5fd !important;
-    }
-    
-    /* === RESPONSIVE === */
-    @media (max-width: 768px) {
-        .main-header { font-size: 2.5rem; }
-        .cue-card { padding: 16px; }
-        .card-title { font-size: 1rem; }
-        .card-header { flex-direction: column; }
-        .card-actions { width: 100%; justify-content: stretch; }
-        .action-btn { flex: 1; justify-content: center; }
+
+    /* Remove gap between columns for the card effect */
+    div[data-testid="stHorizontalBlock"] {
+        align-items: center;
+        background: transparent;
     }
 </style>
 """
@@ -361,6 +257,13 @@ def launch_media(path, settings, start=0, idx=None, resume_f=None):
             return True
     return False
 
+# === DRIVER DEFAULTS ===
+DRIVER_DEFAULTS = {
+    "mpv_native": "mpv",
+    "celluloid_ipc": "celluloid",
+    "vlc_rc": "vlc" # or /Applications/VLC.app/Contents/MacOS/VLC etc depending on OS
+}
+
 def render_sidebar(settings):
     with st.sidebar:
         st.markdown("### Library")
@@ -371,10 +274,20 @@ def render_sidebar(settings):
         
         st.markdown("<br>", unsafe_allow_html=True)
         with st.expander("⚙️ Preferences"):
-            if 'w_exe' not in st.session_state: st.session_state.w_exe = settings.get('player_executable', 'mpv')
-            if 'w_mode' not in st.session_state: st.session_state.w_mode = settings.get('player_type', 'mpv_native')
-            st.radio("Driver", ["mpv_native", "celluloid_ipc", "vlc_rc"], key="w_mode")
+            if 'w_exe' not in st.session_state: 
+                st.session_state.w_exe = settings.get('player_executable', 'mpv')
+            if 'w_mode' not in st.session_state: 
+                st.session_state.w_mode = settings.get('player_type', 'mpv_native')
+            
+            # === CHANGE 3: Dynamic Path Update ===
+            def update_driver_path():
+                # Updates the path input when radio button changes
+                new_mode = st.session_state.w_mode
+                st.session_state.w_exe = DRIVER_DEFAULTS.get(new_mode, "")
+
+            st.radio("Driver", ["mpv_native", "celluloid_ipc", "vlc_rc"], key="w_mode", on_change=update_driver_path)
             st.text_input("Path", key="w_exe")
+            
             if st.button("Save", use_container_width=True):
                 settings.update({'player_executable': st.session_state.w_exe, 'player_type': st.session_state.w_mode})
                 settings_mgr.save_settings(settings)
@@ -390,7 +303,6 @@ def render_card(path, data):
     is_done = (pos/dur > 0.95) if dur else False
     
     badges = []
-    
     badges.append(f'<span class="badge b-folder">{"SERIES" if is_folder else "MOVIE"}</span>')
     
     season_num = data.get('season_number')
@@ -398,8 +310,7 @@ def render_card(path, data):
         try:
             meta = guessit(os.path.basename(raw_file))
             season_num = meta.get('season')
-        except:
-            season_num = None
+        except: season_num = None
         
     if season_num:
         if isinstance(season_num, list): season_num = season_num[0]
@@ -414,46 +325,60 @@ def render_card(path, data):
     if is_done: 
         badges.append('<span class="badge b-success">✓ COMPLETED</span>')
 
-    # Generate unique keys for buttons
-    resume_key = f"resume_{hash(path)}"
-    delete_key = f"delete_{hash(path)}"
+    # Generate unique key suffix for this item
+    k_id = hash(path)
 
-        # Hidden buttons that get triggered by the card buttons
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if st.button("resume_hidden", key=resume_key, help="", type="secondary"):
-            st.session_state['resume_data'] = (path, is_done, pos, is_folder, data['last_played_file'])
-            st.rerun()
-
-    with col2:
-        if st.button("delete_hidden", key=delete_key):
-             session_mgr.delete_session(path)
-             st.rerun()
-
-
-    html = f"""
-    <div class="cue-card">
-        <div class="card-header">
-            <div class="card-title">{display_name}</div>
-            <div class="card-actions">
-                <button class="action-btn" onclick="document.getElementById('{resume_key}').click()">
-                    {'↺ Replay' if is_done else '▶ Resume'}
-                </button>
-                <button class="action-btn delete" onclick="document.getElementById('{delete_key}').click()">
-                    ✕
-                </button>
+    # === REFACTORED CARD LAYOUT ===
+    # Instead of one HTML block, we use columns.
+    # Left: HTML info. Right: Streamlit Buttons.
+    
+    # Container to group them visually (optional, but helps spacing)
+    with st.container():
+        col_info, col_actions = st.columns([0.75, 0.25], gap="small")
+        
+        with col_info:
+            html_info = f"""
+            <div class="cue-card">
+                <div class="card-title">{display_name}</div>
+                <div class="badge-container">{"".join(badges)}</div>
+                <div class="stats-row">
+                    <span>{format_time(pos)} / {format_time(dur)}</span>
+                    <span class="time-remaining">{'Finished' if is_done else format_remaining(dur - pos, is_folder)}</span>
+                </div>
             </div>
-        </div>
-        <div class="badge-container">{"".join(badges)}</div>
-        <div class="stats-row">
-            <span>{format_time(pos)} / {format_time(dur)}</span>
-            <span class="time-remaining">{'Finished' if is_done else format_remaining(dur - pos, is_folder)}</span>
-        </div>
-    </div>
-    """
-    
-    st.markdown(html, unsafe_allow_html=True)
-    
+            """
+            st.markdown(html_info, unsafe_allow_html=True)
+        
+        with col_actions:
+            # Vertically align with the card
+            st.write("") # Spacer
+            
+            # 1. RESUME BUTTON
+            play_label = "↺ Replay" if is_done else "▶ Resume"
+            if st.button(play_label, key=f"play_{k_id}", use_container_width=True):
+                st.session_state['resume_data'] = (path, is_done, pos, is_folder, data['last_played_file'])
+                st.rerun()
+
+            # 2. DELETE BUTTON (With Confirmation)
+            # Check if this specific path is in confirmation mode
+            if st.session_state.get('confirm_del') == path:
+                # Show Confirm / Cancel options
+                c1, c2 = st.columns(2)
+                if c1.button("✓", key=f"y_{k_id}", use_container_width=True, help="Confirm Delete"):
+                    session_mgr.delete_session(path)
+                    del st.session_state['confirm_del']
+                    st.rerun()
+                if c2.button("✕", key=f"n_{k_id}", use_container_width=True, help="Cancel"):
+                    del st.session_state['confirm_del']
+                    st.rerun()
+            else:
+                # Show normal delete button
+                if st.button("Delete", key=f"del_{k_id}", use_container_width=True):
+                    st.session_state['confirm_del'] = path
+                    st.rerun()
+
+    st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
+
 def main():
     settings = settings_mgr.load_settings()
     
