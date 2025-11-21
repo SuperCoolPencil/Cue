@@ -1,6 +1,7 @@
 import os
 import time
 import datetime
+import platform
 import streamlit as st
 import tkinter as tk
 from tkinter import filedialog
@@ -25,18 +26,45 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- Initialization ---
-settings = settings_mgr.load_settings()
+# Load settings from disk
+current_settings = settings_mgr.load_settings()
 if 'selected_path' not in st.session_state: st.session_state['selected_path'] = None
+
+# --- Helper: Auto-Switch Path Logic ---
+def update_path_based_on_mode():
+    """Callback to update the path input when mode changes"""
+    new_mode = st.session_state.widget_mode
+    is_win = platform.system() == "Windows"
+    is_mac = platform.system() == "Darwin"
+    
+    new_path = "mpv" # Fallback
+    
+    if new_mode == "vlc_rc":
+        if is_win: new_path = r"C:\Program Files\VideoLAN\VLC\vlc.exe"
+        elif is_mac: new_path = "/Applications/VLC.app/Contents/MacOS/VLC"
+        else: new_path = "vlc"
+        
+    elif new_mode == "mpv_native":
+        if is_win: new_path = "mpv" # User might need full path, but mpv is common default
+        else: new_path = "mpv"
+        
+    elif new_mode == "celluloid_ipc":
+        if is_win: new_path = "INVALID_ON_WINDOWS"
+        else: new_path = "celluloid"
+
+    # Update the text input key directly
+    st.session_state.widget_exe = new_path
 
 # --- Helper: Play Logic ---
 def handle_play(path, start_pos=0, idx=None, resume_f=None):
     with st.spinner("Launching player..."):
-        res = play_media(settings, path, start_pos, idx, resume_f)
+        # Reload settings from UI state in case they changed just now
+        res = play_media(current_settings, path, start_pos, idx, resume_f)
         if res and res.get('position', 0) > 5:
             session_mgr.update_session(path, res, is_folder=os.path.isdir(path))
             return True
         elif not res:
-            st.error("Player failed to launch or save. Check Settings.")
+            st.error("Player failed to launch. Check Settings path.")
     return False
 
 # --- Sidebar ---
@@ -58,16 +86,41 @@ with st.sidebar:
     
     with st.expander("⚙️ Settings"):
         st.caption("Configuration")
-        new_exe = st.text_input("Player Path", value=settings['player_executable'])
         
+        # 1. Setup Session State for widgets if not present
+        if 'widget_exe' not in st.session_state:
+            st.session_state.widget_exe = current_settings['player_executable']
+        if 'widget_mode' not in st.session_state:
+            st.session_state.widget_mode = current_settings['player_type']
+
+        # 2. The Mode Radio Button (With Callback)
         options = ["mpv_native", "celluloid_ipc", "vlc_rc"]
-        idx = options.index(settings['player_type']) if settings['player_type'] in options else 0
-        new_type = st.radio("Driver Mode", options, index=idx)
+        # Calculate index safely
+        try:
+            default_idx = options.index(st.session_state.widget_mode)
+        except ValueError:
+            default_idx = 0
+
+        st.radio(
+            "Driver Mode", 
+            options, 
+            index=default_idx,
+            key="widget_mode",
+            on_change=update_path_based_on_mode, # <--- THE MAGIC TRIGGER
+            help="mpv_native (Win/Linux), celluloid_ipc (Linux GUI), vlc_rc (All)"
+        )
+        
+        # 3. The Path Input (Linked to session state key)
+        st.text_input(
+            "Player Path", 
+            key="widget_exe" 
+        )
         
         if st.button("Save Settings"):
-            settings['player_executable'] = new_exe
-            settings['player_type'] = new_type
-            settings_mgr.save_settings(settings)
+            # Update the dictionary from widget state
+            current_settings['player_executable'] = st.session_state.widget_exe
+            current_settings['player_type'] = st.session_state.widget_mode
+            settings_mgr.save_settings(current_settings)
             st.success("Saved!")
             time.sleep(0.5)
             st.rerun()
@@ -76,12 +129,12 @@ with st.sidebar:
 
 # --- Main Content ---
 st.markdown('<div class="main-title">Cue</div>', unsafe_allow_html=True)
-st.markdown(f'<div class="subtitle">Resume exactly where you left off. <br><small>Using: {settings["player_executable"]}</small></div>', unsafe_allow_html=True)
+st.markdown(f'<div class="subtitle">Resume exactly where you left off. <br><small>Using: {current_settings["player_executable"]}</small></div>', unsafe_allow_html=True)
 
 # Trigger Play from File Picker
 if st.session_state['selected_path']:
     path = st.session_state['selected_path']
-    st.session_state['selected_path'] = None # Reset
+    st.session_state['selected_path'] = None 
     if handle_play(path):
         st.rerun()
 
