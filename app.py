@@ -192,7 +192,11 @@ MODERN_CSS = """
        For now, we keep the purple theme but standard layout. */
 
     /* === INPUTS === */
-    div[data-baseweb="input"], .stTextInput input {
+    div[data-baseweb="input"] > div { /* Target the inner div that wraps the actual input */
+        margin-bottom: 0 !important; /* Remove any default margin that might cause misalignment */
+    }
+
+    .stTextInput input {
         background: rgba(24, 24, 27, 0.6) !important;
         backdrop-filter: blur(10px) !important;
         border: 1px solid rgba(63, 63, 70, 0.5) !important;
@@ -200,6 +204,9 @@ MODERN_CSS = """
         color: #fafafa !important;
         padding: 0.75rem 1rem !important;
         font-size: 0.9rem !important;
+        line-height: 1.5 !important; /* Adjust line height for better vertical alignment of text */
+        vertical-align: middle !important; /* Ensure vertical alignment */
+        height: auto !important; /* Allow height to adjust based on content and padding */
     }
     
     /* === SIDEBAR === */
