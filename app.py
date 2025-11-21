@@ -222,6 +222,8 @@ st.markdown(MODERN_CSS, unsafe_allow_html=True)
 def open_file_dialog(select_folder=False):
     try:
         root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
+        root.lift() # Bring the window to the front
+        root.update_idletasks() # Ensure window is updated
         path = filedialog.askdirectory() if select_folder else filedialog.askopenfilename()
         root.destroy()
         return path
@@ -268,9 +270,13 @@ def render_sidebar(settings):
     with st.sidebar:
         st.markdown("### Library")
         if st.button("📂 Open Folder", use_container_width=True):
-            if p := open_file_dialog(True): st.session_state['pending_play'] = p
+            if p := open_file_dialog(True):
+                st.session_state['pending_play'] = p
+                st.rerun() # Explicitly trigger rerun after path is selected
         if st.button("📄 Open File", use_container_width=True):
-            if p := open_file_dialog(False): st.session_state['pending_play'] = p
+            if p := open_file_dialog(False):
+                st.session_state['pending_play'] = p
+                st.rerun() # Explicitly trigger rerun after path is selected
         
         st.markdown("<br>", unsafe_allow_html=True)
         with st.expander("⚙️ Preferences"):
