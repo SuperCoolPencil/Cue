@@ -1,18 +1,18 @@
-# 🎬 mpvRecall
+# 🎬 celluloidRecall
 
 **Resume your media exactly where you left off, seamlessly.**
 
-`mpvRecall` is a simple yet powerful tool that leverages [mpv](https://mpv.io/) (a free, open-source, and cross-platform media player) and [Streamlit](https://streamlit.io/) to provide a user-friendly interface for resuming your video and audio playback. Whether you're watching a long movie, a series of episodes, or listening to an album, `mpvRecall` remembers your last position, allowing you to pick up right where you left off.
+`celluloidRecall` is a simple yet powerful tool that leverages [celluloid](https://celluloid-player.github.io/) (a free, open-source media player) and [Streamlit](https://streamlit.io/) to provide a user-friendly interface for resuming your video and audio playback. Whether you're watching a long movie, a series of episodes, or listening to an album, `celluloidRecall` remembers your last position, allowing you to pick up right where you left off.
 
 ---
 
 ## ✨ Features
 
 - **Automatic Resume:** Continues playback from the exact point you stopped — for both single files and folder playlists.  
-- **Folder Playback Support:** Select a folder and `mpvRecall` will play all media files within it. Remembers the last played file *and* its position in the playlist.  
+- **Folder Playback Support:** Select a folder and `celluloidRecall` will play all media files within it. Remembers the last played file *and* its position in the playlist.  
 - **Simple User Interface:** Clean and intuitive web UI powered by Streamlit.  
-- **Cross-Platform (Linux/macOS):** Designed primarily for Linux and macOS using `mpv` and `zenity` for file selection.  
-- **Persistent State:** Stores last played info in `~/.cache/mpv_recall_last.json` for seamless session recall.
+- **Cross-Platform (Linux/macOS):S** Designed primarily for Linux and macOS using `celluloid` and `zenity` for file selection.  
+- **Persistent State:** Stores last played info in `~/.cache/celluloid_recall_last.json` for seamless session recall.
 
 ---
 
@@ -23,9 +23,9 @@
 Ensure the following are installed:
 
 1. **Python 3.x**  
-2. **mpv**  
-   - Linux: `sudo apt install mpv`  
-   - macOS: `brew install mpv`  
+2. **celluloid**  
+   - Linux: `sudo apt install celluloid`  
+   - macOS: `brew install celluloid`  
 3. **Zenity** (used for file/folder picker dialogs)  
    - Linux: `sudo apt install zenity`  
    - macOS: `brew install zenity`  
@@ -33,7 +33,7 @@ Ensure the following are installed:
 ### Installation & Running
 
 1. **Save the code:**  
-   Save the Python code into a file named `mpv_recall_app.py`.
+   Save the Python code into a file named `celluloid_recall_app.py`.
 
 2. **(Optional) Create a Virtual Environment:**
 
@@ -51,10 +51,10 @@ Ensure the following are installed:
 4. **Run the app:**
 
     ```bash
-    streamlit run mpv_recall_app.py
+    streamlit run celluloid_recall_app.py
     ```
 
-This will open `mpvRecall` in your default web browser.
+This will open `celluloidRecall` in your default web browser.
 
 ---
 
@@ -68,11 +68,11 @@ This will open `mpvRecall` in your default web browser.
    - **📁 Select Folder:** Choose a directory containing multiple media files.  
 
 3. **Play Media:**  
-   Click **▶️ Play Selection** to launch `mpv` with your chosen file/folder.
+   Click **▶️ Play Selection** to launch `celluloid` with your chosen file/folder.
 
 4. **Resuming Playback:**  
-   - Upon closing `mpv`, your last played file and timestamp are saved.  
-   - The next launch of `mpvRecall` will show the **🔄 Resume Last Session** section.  
+   - Upon closing `celluloid`, your last played file and timestamp are saved.  
+   - The next launch of `celluloidRecall` will show the **🔄 Resume Last Session** section.  
    - Click **▶️ Resume Last Session** to pick up from where you left off.
 
 
@@ -80,7 +80,7 @@ This will open `mpvRecall` in your default web browser.
 
 ## Credits
 
-- Built using [mpv](https://mpv.io/) and [Streamlit](https://streamlit.io/)  
+- Built using [celluloid](https://celluloid-player.github.io/) and [Streamlit](https://streamlit.io/)  
 - File dialogs powered by [Zenity](https://help.gnome.org/users/zenity/stable/index.html.en)
 
 ![App Screenshot](demo.png)
