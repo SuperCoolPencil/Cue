@@ -1,86 +1,68 @@
-# 🎬 celluloidRecall
+# Cue ⏯️
 
-**Resume your media exactly where you left off, seamlessly.**
+**Cue** is a modern, cross-platform media launcher that remembers exactly where you left off. It acts as a smart dashboard for your local media, tracking playback progress for both individual files and folder-based playlists.
 
-`celluloidRecall` is a simple yet powerful tool that leverages [celluloid](https://celluloid-player.github.io/) (a free, open-source media player) and [Streamlit](https://streamlit.io/) to provide a user-friendly interface for resuming your video and audio playback. Whether you're watching a long movie, a series of episodes, or listening to an album, `celluloidRecall` remembers your last position, allowing you to pick up right where you left off.
-
----
+![Cue Screenshot](https://via.placeholder.com/800x400?text=Cue+Dashboard+UI)
 
 ## ✨ Features
 
-- **Automatic Resume:** Continues playback from the exact point you stopped — for both single files and folder playlists.  
-- **Folder Playback Support:** Select a folder and `celluloidRecall` will play all media files within it. Remembers the last played file *and* its position in the playlist.  
-- **Simple User Interface:** Clean and intuitive web UI powered by Streamlit.  
-- **Cross-Platform (Linux/macOS):S** Designed primarily for Linux and macOS using `celluloid` and `zenity` for file selection.  
-- **Persistent State:** Stores last played info in `~/.cache/celluloid_recall_last.json` for seamless session recall.
+* **Universal Resume:** Remembers playback position for any video or audio file.
+* **Cross-Platform:** Works natively on **Windows** (mpv) and **Linux** (Celluloid or mpv).
+* **Folder Support:** Intelligently resumes entire folders (series/playlists) from the exact file you stopped at.
+* **Visual History:** See progress bars, duration, and "Finished" status for your media library.
+* **Driver System:** Configurable backend to support both CLI players (STDOUT) and GUI wrappers (IPC Sockets).
 
----
+## 🛠️ Prerequisites
 
-## 🚀 How to Use
+1.  **Python 3.7+**
+2.  **Media Player:**
+    * *Windows:* [mpv](https://mpv.io/)
+    * *Linux:* [Celluloid](https://github.com/celluloid-player/celluloid) OR [mpv](https://mpv.io/)
+3.  **Tkinter:** (Usually included with Python, but on Linux you might need `sudo apt install python3-tk`)
 
-### Prerequisites
+## 📦 Installation
 
-Ensure the following are installed:
-
-1. **Python 3.x**  
-2. **celluloid**  
-   - Linux: `sudo apt install celluloid`  
-   - macOS: `brew install celluloid`  
-3. **Zenity** (used for file/folder picker dialogs)  
-   - Linux: `sudo apt install zenity`  
-   - macOS: `brew install zenity`  
-
-### Installation & Running
-
-1. **Save the code:**  
-   Save the Python code into a file named `celluloid_recall_app.py`.
-
-2. **(Optional) Create a Virtual Environment:**
-
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate
-    ```
-
-3. **Install dependencies:**
-
+1.  Clone or download this repository.
+2.  Install the required Python library:
     ```bash
     pip install streamlit
     ```
-
-4. **Run the app:**
-
+3.  Run the application:
     ```bash
-    streamlit run celluloid_recall_app.py
+    streamlit run app.py
     ```
 
-This will open `celluloidRecall` in your default web browser.
+## ⚙️ Configuration
 
----
+**Cue** attempts to auto-detect your operating system on first run.
 
-## 💡 Usage Guide
+### Windows 🪟
+* **Default Player:** `mpv`
+* **Driver Mode:** `mpv_native`
+* *Note:* Ensure `mpv` is added to your System PATH, or paste the full path to `mpv.exe` in the Cue Settings menu.
 
-1. **Initial Launch:**  
-   If no previous data is found, you'll be prompted to play something new.
+### Linux 🐧
+* **Default Player:** `celluloid`
+* **Driver Mode:** `celluloid_ipc`
+* *Note:* If using Flatpak, set the "Player Path" in settings to:
+    `flatpak run io.github.celluloid_player.Celluloid`
 
-2. **Select Media:**  
-   - **📄 Select File:** Choose a single video or audio file.  
-   - **📁 Select Folder:** Choose a directory containing multiple media files.  
+### Changing Drivers
+You can switch drivers in the **Settings** sidebar menu:
 
-3. **Play Media:**  
-   Click **▶️ Play Selection** to launch `celluloid` with your chosen file/folder.
+| Driver Mode | Description | Best For |
+| :--- | :--- | :--- |
+| **mpv_native** | Reads playback status from standard terminal output. | Windows, Raw MPV (Linux) |
+| **celluloid_ipc** | Connects via a hidden socket to read status. | Celluloid, GUI Wrappers |
 
-4. **Resuming Playback:**  
-   - Upon closing `celluloid`, your last played file and timestamp are saved.  
-   - The next launch of `celluloidRecall` will show the **🔄 Resume Last Session** section.  
-   - Click **▶️ Resume Last Session** to pick up from where you left off.
+## 🚀 Usage
 
+1.  Click **Open File** or **Open Folder**.
+2.  Select your media.
+3.  Watch!
+4.  Close the player when you are done.
+5.  **Cue** will automatically save your spot. Click **Resume** next time to pick up right there.
 
----
+## 📝 License
 
-## Credits
-
-- Built using [celluloid](https://celluloid-player.github.io/) and [Streamlit](https://streamlit.io/)  
-- File dialogs powered by [Zenity](https://help.gnome.org/users/zenity/stable/index.html.en)
-
-![App Screenshot](demo.png)
+MIT License. Feel free to modify and distribute.
