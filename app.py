@@ -86,6 +86,35 @@ MODERN_CSS = """
         overflow: hidden;
         height: 100%; /* Fill column height */
     }
+
+    .cue-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+        transition: none; /* Override parent transition */
+    }
+
+    .cue-card:hover {
+        border-color: rgba(167, 139, 250, 0.6);
+        box-shadow: 
+            0 12px 40px -12px rgba(139, 92, 246, 0.5),
+            0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+        transform: translateY(-2px) scale(1.01);
+    }
+
+    .cue-card:hover::before {
+        animation: shimmer-hover 1.5s infinite;
+    }
+
+    @keyframes shimmer-hover {
+        0% { left: -100%; }
+        50% { left: 100%; }
+        100% { left: -100%; }
+    }
     
     /* === CARD CONTENT === */
     .card-title {
