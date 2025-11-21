@@ -10,6 +10,7 @@ import uuid
 import platform
 import tkinter as tk
 from tkinter import filedialog
+from contextlib import closing
 
 # --- Constants & Paths ---
 CACHE_PATH = os.path.expanduser("~/.cache/cue_media_sessions.json")
@@ -17,13 +18,32 @@ SETTINGS_PATH = os.path.expanduser("~/.config/cue_settings.json")
 
 # Detect OS
 IS_WINDOWS = platform.system() == "Windows"
+IS_MACOS = platform.system() == "Darwin"
 
 # --- Settings Management ---
 
 def load_settings():
+    # Default logic
+    default_exe = "mpv"
+    default_type = "mpv_native"
+    
+    if IS_WINDOWS:
+        if os.path.exists(r"C:\Program Files\VideoLAN\VLC\vlc.exe"):
+            default_exe = r"C:\Program Files\VideoLAN\VLC\vlc.exe"
+            default_type = "vlc_rc"
+        else:
+            default_exe = "mpv"
+            default_type = "mpv_native"
+    elif IS_MACOS:
+         default_exe = "/Applications/VLC.app/Contents/MacOS/VLC"
+         default_type = "vlc_rc"
+    else: # Linux
+        default_exe = "celluloid"
+        default_type = "celluloid_ipc"
+
     defaults = {
-        "player_executable": "mpv" if IS_WINDOWS else "celluloid",
-        "player_type": "mpv_native" if IS_WINDOWS else "celluloid_ipc",
+        "player_executable": default_exe,
+        "player_type": default_type,
     }
     
     if os.path.exists(SETTINGS_PATH):
@@ -40,9 +60,16 @@ def save_settings(settings):
     with open(SETTINGS_PATH, 'w') as f:
         json.dump(settings, f, indent=2)
 
-# --- IPC Helper (For Socket-based Players) ---
+# --- Network Helpers ---
+
+def find_free_port():
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.bind(('', 0))
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        return s.getsockname()[1]
 
 def send_ipc_command(sock_path, command):
+    """ For MPV/Celluloid Unix Sockets """
     if not os.path.exists(sock_path): return None
     try:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -53,7 +80,6 @@ def send_ipc_command(sock_path, command):
         response = client.recv(4096)
         client.close()
         response_str = response.decode('utf-8').strip()
-        # Parse potential multi-line JSON responses
         for line in response_str.split('\n'):
             try:
                 j = json.loads(line)
@@ -84,10 +110,8 @@ def driver_mpv_native(executable, path, start_pos=None, playlist_idx=None, resum
     ]
     
     script_path = None
-    # Playlist/Folder logic
     if resume_file and playlist_idx is not None and os.path.isdir(path):
         cmd.append(f"--playlist-start={playlist_idx}")
-        # Lua script to seek only on the specific file load
         script_content = f'''
 local sought = false
 local target_time = {max(start_pos-2, 0)}
@@ -129,7 +153,6 @@ mp.register_event("file-loaded", on_file_loaded)
     finally:
         if script_path and os.path.exists(script_path): os.remove(script_path)
 
-    # Parse Output
     last_line = ""
     if proc.stdout:
         for line in proc.stdout.split('\n'):
@@ -140,34 +163,27 @@ mp.register_event("file-loaded", on_file_loaded)
     match = re.search(r"PATH:(.*?)#POS:([\d:.]+)#DUR:([\d:.]+)", last_line)
     if match:
         p_str, d_str = match.group(2), match.group(3)
-        
         def parse_time(t):
             if ':' in str(t):
                 parts = t.split(':')
                 if len(parts) == 3: return float(parts[0])*3600 + float(parts[1])*60 + float(parts[2])
                 elif len(parts) == 2: return float(parts[0])*60 + float(parts[1])
             return float(t) if t != "unknown" else 0
-
         return {"path": match.group(1), "position": parse_time(p_str), "duration": parse_time(d_str)}
     return None
 
 def driver_celluloid_ipc(executable, path, start_pos=None, playlist_idx=None, resume_file=None):
-    """ Driver for GUI wrappers (Celluloid) using Sockets """
+    """ Driver for Linux GUI wrappers (Celluloid) using Unix Sockets """
     if IS_WINDOWS:
         st.error("IPC mode not supported on Windows.")
         return None
 
     socket_path = f"/tmp/cue_ipc_{uuid.uuid4().hex}.sock"
-    
     cmd = [executable]
-    # Pass arguments individually!
     cmd.append(f"--mpv-input-ipc-server={socket_path}")
     if start_pos: cmd.append(f"--mpv-start={start_pos}")
     if playlist_idx is not None: cmd.append(f"--mpv-playlist-start={playlist_idx}")
     cmd.append(path)
-
-    # Print debug for user if it fails
-    print(f"Cue Driver Executing: {cmd}")
 
     try:
         proc = subprocess.Popen(cmd)
@@ -176,7 +192,7 @@ def driver_celluloid_ipc(executable, path, start_pos=None, playlist_idx=None, re
         return None
 
     last_pos, last_dur, last_path = 0, 0, None
-    time.sleep(2.0) # Wait for app to launch
+    time.sleep(2.0)
 
     while proc.poll() is None:
         fpath, pos, dur = get_ipc_status(socket_path)
@@ -191,8 +207,83 @@ def driver_celluloid_ipc(executable, path, start_pos=None, playlist_idx=None, re
     if os.path.isdir(path) and last_path:
         full = os.path.join(path, last_path)
         if os.path.exists(full): final_path = full
-    
     return {"path": final_path, "position": last_pos, "duration": last_dur}
+
+def driver_vlc_rc(executable, path, start_pos=None, playlist_idx=None, resume_file=None):
+    """ Driver for VLC using TCP Remote Control Interface """
+    port = find_free_port()
+    
+    # VLC CLI Flags
+    # --extraintf rc: Enable RC interface
+    # --rc-host: Bind to localhost port
+    # --start-time: Resume time
+    # --one-instance: Prevent multiple windows from confusing us
+    cmd = [
+        executable,
+        "--extraintf", "rc",
+        "--rc-host", f"localhost:{port}",
+    ]
+    
+    if start_pos:
+        cmd.extend(["--start-time", str(start_pos)])
+        
+    cmd.append(path)
+
+    try:
+        proc = subprocess.Popen(cmd)
+    except FileNotFoundError:
+        st.error(f"Error: `{executable}` not found. Check Settings.")
+        return None
+
+    st.info(f"Connected to VLC on port {port}. Close VLC to save.")
+
+    last_pos = 0
+    last_dur = 0
+    
+    # Wait for VLC to launch and open port
+    connected = False
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client.settimeout(1.0)
+    
+    for _ in range(10):
+        try:
+            time.sleep(1)
+            client.connect(('localhost', port))
+            connected = True
+            break
+        except:
+            continue
+            
+    if not connected:
+        st.error("Could not connect to VLC Remote Interface.")
+        return None
+
+    def vlc_query(cmd_str):
+        try:
+            client.sendall(f"{cmd_str}\n".encode())
+            data = client.recv(1024).decode().strip()
+            # Remove prompt characters like '>'
+            clean = data.replace('>', '').strip()
+            # If multiple lines, take the first valid number
+            lines = clean.split('\n')
+            for line in lines:
+                if line.isdigit(): return int(line)
+            return 0
+        except:
+            return 0
+
+    while proc.poll() is None:
+        # Poll Time
+        t = vlc_query("get_time")
+        l = vlc_query("get_length")
+        
+        if t > 0: last_pos = t
+        if l > 0: last_dur = l
+        
+        time.sleep(1)
+
+    client.close()
+    return {"path": path, "position": last_pos, "duration": last_dur}
 
 # --- Main Logic ---
 
@@ -204,6 +295,8 @@ def play(path, settings, start_pos=None, playlist_idx=None, resume_file=None):
         return driver_mpv_native(exe, path, start_pos, playlist_idx, resume_file)
     elif mode == "celluloid_ipc":
         return driver_celluloid_ipc(exe, path, start_pos, playlist_idx, resume_file)
+    elif mode == "vlc_rc":
+        return driver_vlc_rc(exe, path, start_pos, playlist_idx, resume_file)
     else:
         st.error(f"Unknown player mode: {mode}")
         return None
@@ -222,40 +315,17 @@ def format_time(seconds):
 
 st.set_page_config(page_title="Cue", page_icon="⏯️", layout="centered")
 
-# Custom CSS for the "Cue" branding
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;800&display=swap');
-    
-    .main-title {
-        font-family: 'Inter', sans-serif;
-        font-size: 3rem;
-        font-weight: 800;
-        background: linear-gradient(90deg, #F59E0B, #EF4444);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 0px;
-    }
-    .subtitle {
-        font-family: 'Inter', sans-serif;
-        color: #888;
-        margin-bottom: 20px;
-    }
+    .main-title { font-family: 'Inter', sans-serif; font-size: 3rem; font-weight: 800; background: linear-gradient(90deg, #F59E0B, #EF4444); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0px; }
+    .subtitle { font-family: 'Inter', sans-serif; color: #888; margin-bottom: 20px; }
     .stProgress > div > div > div > div { background-color: #F59E0B; } 
-    .session-card { 
-        background-color: #1F2937; 
-        border: 1px solid #374151; 
-        padding: 15px; 
-        border-radius: 12px; 
-        margin-bottom: 15px; 
-    }
-    .stButton>button {
-        border-radius: 8px;
-    }
+    .session-card { background-color: #1F2937; border: 1px solid #374151; padding: 15px; border-radius: 12px; margin-bottom: 15px; }
+    .stButton>button { border-radius: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
-# Load State
 settings = load_settings()
 sessions = {}
 if os.path.exists(CACHE_PATH):
@@ -263,34 +333,27 @@ if os.path.exists(CACHE_PATH):
         with open(CACHE_PATH, 'r') as f: sessions = json.load(f)
     except: pass
 
-# --- Sidebar: Settings & Controls ---
 with st.sidebar:
     st.markdown("### ⏯️ Controls")
-    
     if st.button("📂 Open Folder", use_container_width=True):
         root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
         p = filedialog.askdirectory()
         root.destroy()
         if p: st.session_state['selected_path'] = p
-        
     if st.button("📄 Open File", use_container_width=True):
         root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
         p = filedialog.askopenfilename()
         root.destroy()
         if p: st.session_state['selected_path'] = p
-
     st.markdown("---")
-    
     with st.expander("⚙️ Settings"):
         st.caption("Configuration")
         new_exe = st.text_input("Player Path", value=settings['player_executable'])
         
-        options = ["mpv_native", "celluloid_ipc"]
+        options = ["mpv_native", "celluloid_ipc", "vlc_rc"]
         idx = options.index(settings['player_type']) if settings['player_type'] in options else 0
         new_type = st.radio("Driver Mode", options, index=idx)
-        
-        st.caption("**Modes:**\n\n*mpv_native*: For Windows or CLI users.\n*celluloid_ipc*: For Linux GUI wrappers.")
-        
+        st.caption("**Modes:**\n\n*mpv_native*: Win/Linux CLI.\n*celluloid_ipc*: Linux GUI.\n*vlc_rc*: VLC (Universal).")
         if st.button("Save Settings"):
             settings['player_executable'] = new_exe
             settings['player_type'] = new_type
@@ -298,24 +361,18 @@ with st.sidebar:
             st.success("Saved!")
             time.sleep(0.5)
             st.rerun()
-
     if st.button("🛑 Stop Cue", type="secondary"): os._exit(0)
-
-# --- Main Content ---
 
 st.markdown('<div class="main-title">Cue</div>', unsafe_allow_html=True)
 st.markdown(f'<div class="subtitle">Resume exactly where you left off. <br><small>Using: {settings["player_executable"]}</small></div>', unsafe_allow_html=True)
 
 if 'selected_path' not in st.session_state: st.session_state['selected_path'] = None
 
-# Handle New Playback
 if st.session_state['selected_path']:
     p = st.session_state['selected_path']
     st.session_state['selected_path'] = None
-    
     with st.spinner("Launching player..."):
         res = play(p, settings)
-        
     if res and res.get('position', 0) > 5:
         sessions[p] = {
             "is_folder": os.path.isdir(p),
@@ -324,14 +381,12 @@ if st.session_state['selected_path']:
             "total_duration": res['duration'],
             "last_played_timestamp": datetime.datetime.now().isoformat()
         }
-        save_settings(settings) # Ensure settings stick
+        save_settings(settings)
         with open(CACHE_PATH, 'w') as f: json.dump(sessions, f, indent=2)
         st.rerun()
 
-# Search & History
 col_s, col_b = st.columns([4,1])
 search = col_s.text_input("Search history", placeholder="Movie name...", label_visibility="collapsed")
-
 filtered = {k:v for k,v in sessions.items() if search.lower() in k.lower() or search.lower() in v.get('last_played_file','').lower()}
 sorted_sess = sorted(filtered.items(), key=lambda i: i[1].get('last_played_timestamp',''), reverse=True)
 
@@ -344,7 +399,6 @@ else:
         dur = data.get('total_duration', 0)
         prog = min(pos/dur, 1.0) if dur else 0
         finished = prog > 0.95
-        
         with st.container():
             st.markdown(f"""
             <div class="session-card">
@@ -358,9 +412,7 @@ else:
                     <span>{int(prog*100)}%</span>
                 </div>
             </div>""", unsafe_allow_html=True)
-            
             if not finished: st.progress(prog)
-            
             c1, c2 = st.columns([4,1])
             if c1.button(f"{'🔄 Replay' if finished else '▶️ Resume'}", key=f"p_{orig_path}", use_container_width=True):
                 if not os.path.exists(orig_path):
@@ -370,12 +422,8 @@ else:
                     if data['is_folder']:
                         files = get_media_files(orig_path)
                         last = data['last_played_file']
-                        if last in files:
-                            idx = files.index(last)
-                            res_f = last
-                    
+                        if last in files: idx = files.index(last); res_f = last
                     res = play(orig_path, settings, start_pos=0 if finished else pos, playlist_idx=idx, resume_file=res_f)
-                    
                     if res and res.get('position', 0) > 2:
                         sessions[orig_path].update({
                             "last_played_file": res['path'],
@@ -385,7 +433,6 @@ else:
                         })
                         with open(CACHE_PATH, 'w') as f: json.dump(sessions, f, indent=2)
                         st.rerun()
-            
             if c2.button("✕", key=f"d_{orig_path}", help="Remove"):
                 del sessions[orig_path]
                 with open(CACHE_PATH, 'w') as f: json.dump(sessions, f, indent=2)
