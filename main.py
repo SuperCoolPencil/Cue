@@ -208,7 +208,8 @@ MODERN_CSS = """
     
     /* === NATIVE BUTTON STYLING === */
     /* Override Streamlit buttons to match the custom look */
-    div.stButton > button {
+    div.stButton > button,
+    [data-testid="stPopoverButton"] { /* Added selector for popover button */
         width: 100%;
         border-radius: 10px !important;
         font-size: 0.85rem !important;
@@ -220,7 +221,8 @@ MODERN_CSS = """
         margin-top: 2px;
     }
 
-    div.stButton > button:hover {
+    div.stButton > button:hover,
+    [data-testid="stPopoverButton"]:hover { /* Added selector for popover button hover */
         border-color: rgba(167, 139, 250, 0.6) !important;
         background: linear-gradient(135deg, rgba(139, 92, 246, 0.3), rgba(109, 40, 217, 0.2)) !important;
         transform: translateY(-1px);
@@ -420,25 +422,18 @@ def render_card(path, session, library_service):
                     st.session_state[edit_state_key] = False
 
                 # -------------------------
-                #       EDIT MODE
+                #    EDIT BUTTON (POPOVER)
                 # -------------------------
-                if st.session_state[edit_state_key]:
-
+                with st.popover("Edit", use_container_width=True):
                     new_title = st.text_input(
                         "New Title",
                         value=display_name,
                         key=f"new_title_{k_id}",
                         label_visibility="collapsed",
-                        on_change=lambda: save_title_and_exit_edit_mode(path, k_id, library_service)
+                        placeholder="Enter new title"
                     )
-
-                else:
-                    # -------------------------
-                    #    EDIT BUTTON MODE
-                    # -------------------------
-                    if st.button("Edit", key=edit_button_key, use_container_width=True):
-                        st.session_state[edit_state_key] = True
-                        st.session_state.is_user_locked_title = True # Set the flag to true
+                    if st.button("Save Title", key=f"save_title_{k_id}", use_container_width=True):
+                        save_title_and_exit_edit_mode(path, k_id, library_service)
                         st.rerun()
 
             with col2:
