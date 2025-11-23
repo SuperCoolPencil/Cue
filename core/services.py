@@ -112,17 +112,23 @@ class LibraryService:
             print(f"No media files found for session: {filepath}")
             return session.playback
 
-        index_to_play = session.playback.last_played_index
+        last_played_index_from_session = session.playback.last_played_index
+        position_from_session = session.playback.position
         
-        if session.playback.is_finished:
-            next_index = index_to_play + 1
-            if next_index < len(series_files):
-                index_to_play = next_index
-            else:
-                print("End of series.")
-                return session.playback
+        index_to_play = last_played_index_from_session # Default to current
+        start_time = position_from_session # Default to current position
 
-        start_time = 0.0 if session.playback.is_finished else session.playback.position
+        if session.playback.is_finished:
+            next_index = last_played_index_from_session + 1
+            if next_index < len(series_files):
+                # There are more episodes, play the next one from the beginning
+                index_to_play = next_index
+                start_time = 0.0
+            else:
+                # Entire series is complete, restart from episode 1 from the beginning
+                print("End of series. Restarting from episode 1.")
+                index_to_play = 0
+                start_time = 0.0
         
         final_playback_state_from_driver = self.player_driver.launch(
             playlist=series_files,
