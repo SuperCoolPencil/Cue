@@ -19,7 +19,6 @@ class MpvDriver(IPlayerDriver):
         if not playlist:
             return PlaybackState()
 
-        # 1. Setup a unique socket name (prevents collisions if multiple players run)
         is_windows = sys.platform.startswith('win')
         socket_path = r'\\.\pipe\mpv_socket' if is_windows else f"/tmp/mpv-socket-{os.getpid()}"
 
@@ -30,10 +29,10 @@ class MpvDriver(IPlayerDriver):
             "mpv",
             "--no-terminal",
             f"--input-ipc-server={socket_path}",
-            f"--start={start_time}",
             f"--playlist-start={start_index}",
             "--force-media-title=dummy",
-            "--idle=no", # Ensure MPV closes when file ends
+            "--idle=no",
+            "--pause",  # 1. Start paused
         ]
         command.extend(playlist)
 
@@ -44,62 +43,79 @@ class MpvDriver(IPlayerDriver):
         final_position = start_time
         total_duration = 0.0
         is_finished = False
-        last_played_file = playlist[start_index]
+        last_played_file = playlist[start_index] if start_index < len(playlist) else playlist[0]
+
+        # Flag to ensure we only seek specifically for the FIRST file
+        initial_seek_done = False 
 
         try:
-            # 2. Connect to the MPV socket
             ipc = self._connect_ipc(socket_path, is_windows, timeout=5)
             if not ipc:
                 raise ConnectionError("Failed to connect to MPV IPC socket.")
             
-            # 3. Loop while process is alive to track progress
             while process.poll() is None:
                 try:
-                    # Query time-pos
+                    # --- 1. CHECK DURATION FIRST (Required to know if file is loaded) ---
+                    # We need to know the duration before we can safely seek.
+                    current_dur = None
+                    dur_resp = self._send_ipc_command(ipc, ["get_property", "duration"])
+                    
+                    if dur_resp is not None:
+                        try:
+                            current_dur = float(dur_resp)
+                            # Only update total_duration if we haven't set it for this file yet
+                            if total_duration == 0.0:
+                                total_duration = current_dur
+                        except (ValueError, TypeError):
+                            pass
+
+                    # --- 2. HANDLE INITIAL SEEK & UNPAUSE ---
+                    # We only do this ONCE, and only after we confirmed the file is loaded (current_dur > 0)
+                    if not initial_seek_done and current_dur is not None and current_dur > 0:
+                        if start_time > 0:
+                            print(f"File loaded. Seeking to {start_time}...")
+                            self._send_ipc_command(ipc, ["seek", str(start_time), "absolute"])
+                        
+                        # Unpause now that we are ready
+                        self._send_ipc_command(ipc, ["set_property", "pause", False])
+                        initial_seek_done = True
+
+                    # --- 3. DETECT NEXT EPISODE ---
+                    current_path = self._send_ipc_command(ipc, ["get_property", "path"])
+                    
+                    if current_path and current_path != last_played_file:
+                        print(f"Next episode detected: {current_path}")
+                        last_played_file = current_path
+                        total_duration = 0.0 # Reset duration
+                        final_position = 0.0 
+                        # Note: We do NOT reset initial_seek_done. 
+                        # This ensures the 2nd file starts naturally at 00:00.
+
+                    # --- 4. GET POSITION ---
                     pos = self._send_ipc_command(ipc, ["get_property", "time-pos"])
                     if pos is not None:
                         try:
                             final_position = float(pos)
                         except (ValueError, TypeError):
-                            print(f"Warning: Could not convert position '{pos}' to float.")
+                            pass
                     
-                    # Query duration (only need to do this until we get a value)
-                    if total_duration == 0.0:
-                        dur = self._send_ipc_command(ipc, ["get_property", "duration"])
-                        if dur is not None:
-                            try:
-                                total_duration = float(dur)
-                            except (ValueError, TypeError):
-                                print(f"Warning: Could not convert duration '{dur}' to float.")
-                    
-                    # Get the current playing file
-                    path = self._send_ipc_command(ipc, ["get_property", "path"])
-                    if path:
-                        last_played_file = path
-
-                    # Don't spam the socket; check every 1 second
                     time.sleep(1)
                     
                 except (BrokenPipeError, ConnectionResetError):
-                    # MPV closed abruptly
                     break
             
-            # 4. Cleanup
             if ipc:
                 ipc.close()
 
-            # Determine if finished (heuristic: within 5s of end)
             if total_duration > 0 and (total_duration - final_position) < 5.0:
                 is_finished = True
 
         except Exception as e:
             print(f"IPC Error: {e}")
         finally:
-            # Ensure process is dead
             if process.poll() is None:
                 process.terminate()
             
-            # Cleanup socket file (Linux/Mac only)
             if not is_windows and os.path.exists(socket_path):
                 os.remove(socket_path)
 
