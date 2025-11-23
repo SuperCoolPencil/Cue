@@ -4,18 +4,18 @@ import json
 import os
 import time
 import sys
-from typing import Optional, List
+from typing import List
 from datetime import datetime
 
 # Assuming these imports exist in your project structure
 from core.interfaces import IPlayerDriver
 from core.domain import PlaybackState
 
-class MpvDriver(IPlayerDriver):
-    def __init__(self, executable_path: str = "mpv"):
+class PlayerDriver(IPlayerDriver):
+    def __init__(self, executable_path: str = "celluloid"):
         self.executable_path = executable_path
         self.request_id_counter = 0
-    
+
     def launch(self, playlist: List[str], start_index: int = 0, start_time: float = 0.0) -> PlaybackState:
         if not playlist:
             return PlaybackState()
@@ -26,13 +26,12 @@ class MpvDriver(IPlayerDriver):
         if not is_windows and os.path.exists(socket_path):
             os.remove(socket_path)
 
-        # --- COMMAND SETUP ---
-        # Note: We removed --playlist-start from here because we will force it via IPC
+        # --- 1. COMMAND SETUP ---
+        # We start paused so the user doesn't hear Ep1 start playing for a split second
         mpv_engine_flags = [
             f"--input-ipc-server={socket_path}",
-            "--force-media-title=dummy",
-            "--idle=no",
-            "--pause" # Crucial: Start paused so we can swap episodes without user seeing Ep1
+            "--idle=yes",
+            "--pause" 
         ]
 
         final_command = []
@@ -54,71 +53,84 @@ class MpvDriver(IPlayerDriver):
         final_position = start_time
         total_duration = 0.0
         is_finished = False
-        last_played_file = playlist[0] # Default to first, update later
+        last_played_file = playlist[0] 
 
-        # --- STARTUP STATE MACHINE ---
-        # We need to perform specific actions in order:
-        # 0. Connect
-        # 1. Switch to correct Episode Index (if needed)
-        # 2. Wait for that Episode to load (Duration > 0)
-        # 3. Seek to timestamp
-        # 4. Unpause
-        startup_phase = "SWITCH_INDEX" # Start, Seek, Play
+        # --- 2. THE STARTUP STATE MACHINE ---
+        # Phases:
+        # 0. WAIT_PLAYLIST_LOAD: Wait until MPV knows it has X files.
+        # 1. FORCE_INDEX: Tell MPV to switch to start_index.
+        # 2. WAIT_FILE_LOAD: Wait for that specific file to report a duration.
+        # 3. SEEK_AND_PLAY: Jump to time and unpause.
+        startup_phase = "WAIT_PLAYLIST_LOAD"
+        
+        # Safety timeout to prevent infinite loops if playlist loading fails
+        startup_start_time = time.time()
         
         try:
-            ipc = self._connect_ipc(socket_path, is_windows, timeout=10)
+            # Give Celluloid a bit more time to breathe on startup (timeout=15s)
+            ipc = self._connect_ipc(socket_path, is_windows, timeout=15)
             if not ipc:
                 raise ConnectionError("Failed to connect to IPC socket.")
             
             while process.poll() is None:
                 try:
-                    # --- CONSTANTLY MONITOR PATH & TIME ---
-                    # We need these for the return state regardless of startup phase
+                    # --- A. ALWAYS GET VITAL STATS ---
+                    # We need these to return valid state even if we crash/exit
                     curr_path = self._send_ipc_command(ipc, ["get_property", "path"])
                     curr_pos = self._send_ipc_command(ipc, ["get_property", "time-pos"])
                     
+                    # Update file tracking
                     if curr_path:
-                        # Update last played file if it changes (and looks valid)
-                        # Use 'in' check because MPV paths might be absolute vs relative
                         matched_file = next((f for f in playlist if f in curr_path or curr_path in f), None)
                         if matched_file:
                             last_played_file = matched_file
 
+                    # Update position tracking
                     if curr_pos is not None:
-                        try:
-                            final_position = float(curr_pos)
+                        try: final_position = float(curr_pos)
                         except: pass
 
-                    # --- STARTUP LOGIC ---
+                    # --- B. STARTUP SEQUENCE ---
                     if startup_phase != "DONE":
                         
-                        # STEP 1: Ensure we are on the correct Playlist Index
-                        if startup_phase == "SWITCH_INDEX":
-                            # Get current index (0-based)
-                            curr_idx_resp = self._send_ipc_command(ipc, ["get_property", "playlist-pos"])
-                            if curr_idx_resp is not None:
-                                current_idx = int(curr_idx_resp)
-                                if current_idx != start_index:
-                                    print(f"Wrong Episode (Index {current_idx}). Switching to Index {start_index}...")
-                                    self._send_ipc_command(ipc, ["set_property", "playlist-pos", start_index])
-                                    time.sleep(0.5) # Give it a moment to switch
+                        # Phase 0: Wait for Playlist Population
+                        if startup_phase == "WAIT_PLAYLIST_LOAD":
+                            # Ask MPV: "How many files do you see?"
+                            count_resp = self._send_ipc_command(ipc, ["get_property", "playlist-count"])
+                            if count_resp is not None:
+                                count = int(count_resp)
+                                # We need at least enough files to reach our index
+                                if count > start_index:
+                                    print(f"Playlist loaded ({count} files). Moving to index switch.")
+                                    startup_phase = "FORCE_INDEX"
                                 else:
-                                    # We are on the right index, move to loading check
-                                    startup_phase = "WAIT_FOR_LOAD"
+                                    # Still loading files... wait.
+                                    pass
 
-                        # STEP 2: Wait for Duration (Confirmation file is loaded)
-                        elif startup_phase == "WAIT_FOR_LOAD":
+                        # Phase 1: Force Index Switch
+                        elif startup_phase == "FORCE_INDEX":
+                            idx_resp = self._send_ipc_command(ipc, ["get_property", "playlist-pos"])
+                            if idx_resp is not None and int(idx_resp) != start_index:
+                                print(f"Switching from Index {idx_resp} to {start_index}...")
+                                self._send_ipc_command(ipc, ["set_property", "playlist-pos", start_index])
+                                time.sleep(0.5) # Allow switch to happen
+                            elif idx_resp is not None and int(idx_resp) == start_index:
+                                # We are at the right index
+                                startup_phase = "WAIT_FILE_LOAD"
+
+                        # Phase 2: Wait for Duration (File Load)
+                        elif startup_phase == "WAIT_FILE_LOAD":
                             dur_resp = self._send_ipc_command(ipc, ["get_property", "duration"])
                             if dur_resp is not None:
                                 try:
                                     d = float(dur_resp)
                                     if d > 0:
                                         total_duration = d
-                                        startup_phase = "SEEK"
+                                        startup_phase = "SEEK_AND_PLAY"
                                 except: pass
                         
-                        # STEP 3: Seek and Unpause
-                        elif startup_phase == "SEEK":
+                        # Phase 3: Seek & Unpause
+                        elif startup_phase == "SEEK_AND_PLAY":
                             if start_time > 0:
                                 print(f"Seeking to {start_time}s...")
                                 self._send_ipc_command(ipc, ["seek", str(start_time), "absolute"])
@@ -127,22 +139,27 @@ class MpvDriver(IPlayerDriver):
                             self._send_ipc_command(ipc, ["set_property", "pause", False])
                             startup_phase = "DONE"
 
-                    # --- NORMAL PLAYBACK MONITORING ---
+                        # Timeout safeguard (15 seconds max for startup logic)
+                        if time.time() - startup_start_time > 15:
+                            print("Startup sequence timed out. Force unpausing.")
+                            self._send_ipc_command(ipc, ["set_property", "pause", False])
+                            startup_phase = "DONE"
+
+                    # --- C. NORMAL PLAYBACK ---
                     else:
-                        # Just keep updating duration in case it changes (streaming) or new file
                         dur_resp = self._send_ipc_command(ipc, ["get_property", "duration"])
                         if dur_resp:
                             try: total_duration = float(dur_resp)
                             except: pass
                     
-                    time.sleep(0.5)
+                    time.sleep(0.25) # Faster polling during startup
                     
                 except (BrokenPipeError, ConnectionResetError):
                     break
             
             if ipc: ipc.close()
 
-            # Completion check
+            # Finished check
             if total_duration > 0 and (total_duration - final_position) < 10.0:
                 is_finished = True
 
@@ -162,13 +179,13 @@ class MpvDriver(IPlayerDriver):
             timestamp=datetime.now()
         )
 
+    # (Keep _connect_ipc and _send_ipc_command exactly as they were in the previous step)
     def _connect_ipc(self, path, is_windows, timeout=5):
-        """Connects to the MPV IPC socket/pipe with a retry mechanism."""
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
                 if is_windows:
-                    # This is a simplified placeholder. Production Windows support is more complex.
+                    time.sleep(1)
                     pass
                 else:
                     if os.path.exists(path):
@@ -176,33 +193,28 @@ class MpvDriver(IPlayerDriver):
                         s.connect(path)
                         return s
             except (ConnectionRefusedError, FileNotFoundError):
-                time.sleep(0.1) # Wait a bit before retrying
+                time.sleep(0.2)
             except Exception as e:
                 print(f"Could not connect to IPC: {e}")
                 return None
-        print(f"IPC connection timed out after {timeout} seconds.")
         return None
 
     def _send_ipc_command(self, sock, command_list):
-        """Sends a JSON command to MPV and waits for the specific response."""
         if not sock: return None
-        
         self.request_id_counter += 1
         request_id = self.request_id_counter
         
         message = json.dumps({"command": command_list, "request_id": request_id}) + "\n"
         try:
             sock.sendall(message.encode('utf-8'))
-            
-            buffer = ""
             sock.settimeout(2.0)
+            buffer = ""
             
             while True:
                 try:
                     chunk = sock.recv(4096).decode('utf-8')
                     if not chunk: return None
                     buffer += chunk
-                    
                     while '\n' in buffer:
                         line, buffer = buffer.split('\n', 1)
                         if not line: continue
@@ -214,7 +226,6 @@ class MpvDriver(IPlayerDriver):
                             pass
                 except socket.timeout:
                     return None
-        except Exception as e:
-            print(f"Error sending IPC command or reading response: {e}")
+        except Exception:
             return None
         return None

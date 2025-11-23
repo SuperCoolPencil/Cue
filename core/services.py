@@ -42,7 +42,7 @@ class LibraryService:
                 if 'title' in guessed:
                     initial_title = guessed['title']
                 if 'season' in guessed:
-                    season_number = guessed['season']
+                    season_number = guessed['season'] if (type(guessed['season']) is int) else None
                 print(f"Guessed title for {filepath}: {initial_title}, Season: {season_number}")
             except Exception as e:
                 print(f"Error guessing title for {filepath}: {e}")

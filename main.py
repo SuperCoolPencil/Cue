@@ -15,6 +15,8 @@ except ImportError:
 from core.services import LibraryService
 from core.repository import JsonRepository
 from core.drivers.mpv_driver import MpvDriver
+from core.drivers.vlc_driver import VlcDriver
+from core. drivers.ipc_driver import PlayerDriver
 from core.settings import load_settings, save_settings
 
 PAGE_TITLE = "Cue"
@@ -276,14 +278,25 @@ def open_file_dialog(select_folder=False):
 
 DRIVER_DEFAULTS = {
     "mpv_native": "mpv",
-    "celluloid_ipc": "celluloid",
+    "ipc": "celluloid",
     "vlc_rc": "vlc"
 }
 
-def get_library_service():
+def get_library_service(settings: dict): # Add settings parameter
     storage_file = Path("sessions.json")
     repository = JsonRepository(storage_file)
-    player_driver = MpvDriver()
+    player_driver_type = settings.get('player_type', 'mpv_native') # Default to mpv
+    player_executable_path = settings.get('player_executable', 'mpv') # Default to mpv executable
+
+    if player_driver_type == 'vlc_rc':
+        player_driver = VlcDriver()
+
+    if player_driver_type == 'ipc':
+        player_driver = PlayerDriver(player_executable_path)
+
+    else:
+        player_driver = MpvDriver(player_executable_path)
+    
     return LibraryService(repository, player_driver)
 
 def render_sidebar(settings):
@@ -302,8 +315,13 @@ def render_sidebar(settings):
         with st.expander("⚙️ Preferences"):
             if 'w_exe' not in st.session_state: 
                 st.session_state.w_exe = settings.get('player_executable', 'mpv')
-            if 'w_mode' not in st.session_state: 
-                st.session_state.w_mode = settings.get('player_type', 'mpv_native')
+            if 'w_mode' not in st.session_state:
+                # Map 'celluloid_ipc' to 'ipc' for compatibility with st.radio options
+                player_type_from_settings = settings.get('player_type', 'mpv_native')
+                if player_type_from_settings == 'celluloid_ipc':
+                    st.session_state.w_mode = 'ipc'
+                else:
+                    st.session_state.w_mode = player_type_from_settings
             
             # === CHANGE 3: Dynamic Path Update ===
             def update_driver_path():
@@ -311,7 +329,7 @@ def render_sidebar(settings):
                 new_mode = st.session_state.w_mode
                 st.session_state.w_exe = DRIVER_DEFAULTS.get(new_mode, "")
 
-            st.radio("Driver", ["mpv_native", "celluloid_ipc", "vlc_rc"], key="w_mode", on_change=update_driver_path)
+            st.radio("Driver", ["mpv_native", "ipc", "vlc_rc"], key="w_mode", on_change=update_driver_path)
             st.text_input("Path", key="w_exe")
             
             if st.button("Save", use_container_width=True):
@@ -445,7 +463,7 @@ def render_card(path, session, library_service):
 
 def main():
     settings = load_settings()
-    library_service = get_library_service()
+    library_service = get_library_service(settings) # Pass settings to the function
 
     if 'sessions' not in st.session_state:
         st.session_state.sessions = library_service.get_all_sessions()
