@@ -136,10 +136,17 @@ class LibraryService:
         session.playback.is_finished = final_playback_state_from_driver.is_finished
         session.playback.timestamp = final_playback_state_from_driver.timestamp
         session.playback.last_played_file = final_playback_state_from_driver.last_played_file
-        try:
-            session.playback.last_played_index = series_files.index(final_playback_state_from_driver.last_played_file)
-        except ValueError:
-            session.playback.last_played_index = 0
+        
+        # Robustly find the last_played_index, allowing for partial path matches
+        # to prevent ValueError if paths don't exactly match (e.g., due to OS path differences, etc.)
+        matched_index = 0
+        if final_playback_state_from_driver.last_played_file:
+            for i, file_in_series in enumerate(series_files):
+                if (final_playback_state_from_driver.last_played_file in file_in_series) or \
+                   (file_in_series in final_playback_state_from_driver.last_played_file):
+                    matched_index = i
+                    break
+        session.playback.last_played_index = matched_index
         
         self.repository.save_session(session)
         

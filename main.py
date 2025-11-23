@@ -437,6 +437,7 @@ def render_card(path, session, library_service):
                     # -------------------------
                     if st.button("Edit", key=edit_button_key, use_container_width=True):
                         st.session_state[edit_state_key] = True
+                        st.session_state.is_user_locked_title = True # Set the flag to true
                         st.rerun()
 
             with col2:
@@ -467,6 +468,8 @@ def main():
 
     if 'sessions' not in st.session_state:
         st.session_state.sessions = library_service.get_all_sessions()
+    if 'is_user_locked_title' not in st.session_state:
+        st.session_state.is_user_locked_title = False
 
     def reload_sessions_and_rerun():
         st.session_state.sessions = library_service.get_all_sessions()
