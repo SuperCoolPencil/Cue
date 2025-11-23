@@ -190,7 +190,7 @@ class PlayerDriver(IPlayerDriver):
         # 3. Seek and Unpause
         if target_time > 0:
             self._send_ipc(ipc, ["seek", str(target_time), "absolute"])
-            time.sleep(0.2) # Brief buffer for seek
+            #time.sleep(0.2) # Brief buffer for seek
 
         self._send_ipc(ipc, ["set_property", "pause", False])
         return True
