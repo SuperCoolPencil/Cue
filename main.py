@@ -225,6 +225,19 @@ def open_in_file_manager(path: str):
     except Exception as e:
         st.error(f"Could not open file manager: {e}")
 
+def open_file_in_default_app(path: str):
+    """Opens the file in the system's default application for that file type."""
+    try:
+        path = os.path.abspath(path)
+        if platform.system() == "Windows":
+            os.startfile(path)
+        elif platform.system() == "Darwin":  # macOS
+            subprocess.run(['open', path])
+        else:  # Linux
+            subprocess.run(['xdg-open', path])
+    except Exception as e:
+        st.error(f"Error opening file: {e}")
+
 def get_library_service(settings: Dict) -> LibraryService:
     """Configures and returns the LibraryService based on current settings."""
     storage_file = Path("sessions.json")
@@ -267,6 +280,14 @@ def render_sidebar(settings: Dict):
                 st.session_state['pending_play'] = p
                 st.rerun()
         
+        # === UPDATED BUTTON ===
+        if st.button("📝 Edit Database", use_container_width=True, help="Open sessions.json in default editor"):
+            db_path = "sessions.json"
+            if os.path.exists(db_path):
+                open_file_in_default_app(db_path)
+            else:
+                st.warning("Database file not found. Play a video to create it.")
+        
         st.markdown("<br>", unsafe_allow_html=True)
         
         # Settings
@@ -277,7 +298,6 @@ def render_sidebar(settings: Dict):
             
             if 'w_mode' not in st.session_state:
                 saved_type = settings.get('player_type', 'mpv_native')
-                # Map legacy celluloid_ipc to standard ipc
                 st.session_state.w_mode = 'ipc' if saved_type == 'celluloid_ipc' else saved_type
 
             def update_driver_path():
