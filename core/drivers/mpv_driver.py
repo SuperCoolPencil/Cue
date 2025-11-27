@@ -27,7 +27,7 @@ class MpvDriver(IPlayerDriver):
             os.remove(socket_path)
 
         command = [
-            "mpv",
+            self.player_executable_path,
             "--no-terminal",
             f"--input-ipc-server={socket_path}",
             f"--playlist-start={start_index}",
