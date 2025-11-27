@@ -4,6 +4,8 @@ import tkinter as tk
 from tkinter import filedialog
 from pathlib import Path
 from typing import Optional, Dict
+import platform
+import subprocess
 
 import streamlit as st
 
@@ -195,6 +197,34 @@ def open_file_dialog(select_folder: bool = False) -> Optional[str]:
     except Exception:
         return None
 
+def open_in_file_manager(path: str):
+    """
+    Opens the file manager at the specified path.
+    If path is a file, it highlights the file.
+    If path is a directory, it opens the directory.
+    """
+    path = os.path.abspath(path)
+    system = platform.system()
+
+    try:
+        if system == "Windows":
+            path = os.path.normpath(path)
+            if os.path.isfile(path):
+                subprocess.run(['explorer', '/select,', path])
+            else:
+                subprocess.run(['explorer', path])
+        elif system == "Darwin":  # macOS
+            if os.path.isfile(path):
+                subprocess.run(['open', '-R', path])
+            else:
+                subprocess.run(['open', path])
+        else:  # Linux
+            # xdg-open usually opens the directory containing the file
+            dir_path = os.path.dirname(path) if os.path.isfile(path) else path
+            subprocess.run(['xdg-open', dir_path])
+    except Exception as e:
+        st.error(f"Could not open file manager: {e}")
+
 def get_library_service(settings: Dict) -> LibraryService:
     """Configures and returns the LibraryService based on current settings."""
     storage_file = Path("sessions.json")
@@ -297,8 +327,9 @@ def render_card(path: str, session, library_service: LibraryService):
 
     # Card Layout
     with st.container():
-        col_info, col_actions = st.columns([0.75, 0.25], gap="small")
+        col_info, col_actions = st.columns([0.72, 0.28], gap="small")
         
+        # === INFORMATION COLUMN ===
         with col_info:
             html_info = f"""
             <div class="cue-card">
@@ -312,20 +343,27 @@ def render_card(path: str, session, library_service: LibraryService):
             """
             st.markdown(html_info, unsafe_allow_html=True)
         
+        # === ACTIONS COLUMN ===
         with col_actions:
             st.write("") # Spacer for vertical alignment
             
-            # 1. Action: Resume/Replay
+            # 1. Primary Action: Resume/Replay
             play_label = "↺ Replay" if is_done else "▶ Resume"
             if st.button(play_label, key=f"play_{k_id}", use_container_width=True):
                 st.session_state['resume_data'] = path
                 st.rerun()
 
-            col_a, col_b = st.columns(2)
+            # 2. Secondary Actions Row (Folder | Edit | Delete)
+            c_folder, c_edit, c_del = st.columns([1, 1, 1], gap="small")
             
-            # 2. Action: Edit Metadata
-            with col_a:
-                with st.popover("Edit", use_container_width=True):
+            # A. Open Folder
+            with c_folder:
+                if st.button("📂", key=f"open_{k_id}", help="Show in File Manager", use_container_width=True):
+                    open_in_file_manager(path)
+
+            # B. Edit Metadata
+            with c_edit:
+                with st.popover("✎", use_container_width=True):
                     st.markdown("##### Edit Metadata")
                     st.text_input("Title", value=display_name, key=f"new_title_{k_id}", label_visibility="collapsed", placeholder="Enter new title")
                     st.number_input(
@@ -335,25 +373,20 @@ def render_card(path: str, session, library_service: LibraryService):
                         key=f"new_season_{k_id}", 
                         label_visibility="collapsed"
                     )
-                    if st.button("Save Metadata", key=f"save_title_{k_id}", use_container_width=True):
+                    if st.button("Save", key=f"save_title_{k_id}", use_container_width=True):
                         save_title_and_exit_edit_mode(path, k_id, library_service)
                         st.rerun()
 
-            # 3. Action: Delete
-            with col_b:
+            # C. Delete
+            with c_del:
                 if st.session_state.get('confirm_del') == path:
-                    # Confirmation state
-                    c1, c2 = st.columns(2)
-                    if c1.button("✓", key=f"y_{k_id}", use_container_width=True, help="Confirm"):
+                    if st.button("✓", key=f"y_{k_id}", use_container_width=True, help="Confirm Delete"):
                         library_service.repository.delete_session(path)
                         del st.session_state.sessions[path]
                         del st.session_state['confirm_del']
                         st.rerun()
-                    if c2.button("✕", key=f"n_{k_id}", use_container_width=True, help="Cancel"):
-                        del st.session_state['confirm_del']
-                        st.rerun()
                 else:
-                    if st.button("Delete", key=f"del_{k_id}", use_container_width=True):
+                    if st.button("✕", key=f"del_{k_id}", use_container_width=True, help="Remove from Library"):
                         st.session_state['confirm_del'] = path
                         st.rerun()
 
