@@ -22,7 +22,7 @@ from core.repository import JsonRepository
 from core.drivers.mpv_driver import MpvDriver
 from core.drivers.vlc_driver import VlcDriver
 from core.drivers.ipc_driver import PlayerDriver
-from core.settings import load_settings, save_settings
+from core.settings import load_settings, save_settings, SESSIONS_PATH
 from core.utils import format_seconds_to_human_readable
 
 # === CONSTANTS & CONFIGURATION ===
@@ -106,7 +106,7 @@ def open_file_in_default_app(path: str):
 
 def get_library_service(settings: Dict) -> LibraryService:
     """Configures and returns the LibraryService based on current settings."""
-    storage_file = Path("sessions.json")
+    storage_file = SESSIONS_PATH
     repository = JsonRepository(storage_file)
     
     player_type = settings.get('player_type', 'mpv_native')
@@ -148,9 +148,9 @@ def render_sidebar(settings: Dict):
         
         # === UPDATED BUTTON ===
         if st.button("📝 Edit Database", use_container_width=True, help="Open sessions.json in default editor"):
-            db_path = "sessions.json"
-            if os.path.exists(db_path):
-                open_file_in_default_app(db_path)
+            db_path = SESSIONS_PATH
+            if db_path.exists():
+                open_file_in_default_app(str(db_path))
             else:
                 st.warning("Database file not found. Play a video to create it.")
         

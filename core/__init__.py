@@ -14,7 +14,8 @@ from core import settings as settings_mgr # Import the new settings module
 # --- Configuration (can be moved to a separate config file if needed) ---
 # Load settings from the new settings module
 current_settings = settings_mgr.load_settings()
-DEFAULT_STORAGE_PATH = Path("~/.cue/sessions.json").expanduser()
+current_settings = settings_mgr.load_settings()
+DEFAULT_STORAGE_PATH = settings_mgr.SESSIONS_PATH
 
 # Determine player driver based on settings
 PLAYER_DRIVERS = {
