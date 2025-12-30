@@ -4,6 +4,7 @@ from typing import Dict, Any
 
 DEFAULT_SETTINGS_PATH = Path("~/.cue/settings.json").expanduser()
 SESSIONS_PATH = Path("~/.cue/sessions.json").expanduser()
+DATABASE_PATH = Path("~/.cue/cue.db").expanduser()
 
 def load_settings(settings_path: Path = DEFAULT_SETTINGS_PATH) -> Dict[str, Any]:
     """Loads application settings from a JSON file."""

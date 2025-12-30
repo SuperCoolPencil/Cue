@@ -1,6 +1,19 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
+
+
+@dataclass
+class WatchEvent:
+    """Records a single viewing session for statistics tracking."""
+    id: Optional[int] = None
+    filepath: str = ""
+    started_at: datetime = field(default_factory=datetime.now)
+    ended_at: datetime = field(default_factory=datetime.now)
+    position_start: float = 0.0
+    position_end: float = 0.0
+    episode_index: int = 0
+
 
 @dataclass
 class PlaybackState:
@@ -12,12 +25,18 @@ class PlaybackState:
     is_finished: bool = False
     timestamp: datetime = field(default_factory=datetime.now)
 
+
 @dataclass
 class MediaMetadata:
     """Represents the static metadata for a media file."""
     clean_title: str
     season_number: Optional[int] = None
-    is_user_locked_title: bool = False # If true, the title should not be overwritten by auto-guessing
+    is_user_locked_title: bool = False  # If true, title won't be auto-guessed
+    genres: List[str] = field(default_factory=list)
+    rating: Optional[float] = None
+    description: Optional[str] = None
+    poster_path: Optional[str] = None
+
 
 @dataclass
 class Session:

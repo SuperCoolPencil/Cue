@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
-from typing import Optional, Dict, List
+from datetime import datetime, timedelta
+from typing import Optional, Dict, List, Tuple
 
 # Try to import guessit, but make it optional
 try:
@@ -9,7 +10,7 @@ except ImportError:
     guessit = None
     print("Warning: 'guessit' library not found. Title guessing will be disabled.")
 
-from core.domain import PlaybackState, MediaMetadata, Session
+from core.domain import PlaybackState, MediaMetadata, Session, WatchEvent
 from core.interfaces import IPlayerDriver, IRepository
 from core.utils import get_media_files
 
@@ -136,6 +137,19 @@ class LibraryService:
             start_time=start_time
         )
         
+        # Record watch event for statistics
+        watch_end_time = datetime.now()
+        watch_duration = final_playback_state_from_driver.position - start_time
+        if watch_duration > 0:  # Only record if actually watched something
+            self.record_watch_event(
+                filepath=filepath,
+                started_at=watch_end_time - timedelta(seconds=watch_duration),
+                ended_at=watch_end_time,
+                position_start=start_time,
+                position_end=final_playback_state_from_driver.position,
+                episode_index=index_to_play
+            )
+        
         # Update the session's playback state
         session.playback.position = final_playback_state_from_driver.position
         session.playback.duration = final_playback_state_from_driver.duration
@@ -161,3 +175,66 @@ class LibraryService:
     def get_all_sessions(self) -> Dict[str, Session]:
         """Returns all sessions currently managed by the service."""
         return self.sessions
+
+    def get_resume_action(self, session: Session) -> str:
+        """
+        Determines the appropriate resume action based on context.
+        
+        Returns:
+            'restart_or_next': If >95% complete, offer to start from beginning or next episode
+            'show_recap': If away for >7 days, suggest showing a recap
+            'resume': Normal resume from last position
+        """
+        now = datetime.now()
+        days_since_last = (now - session.playback.timestamp).days
+        
+        # Calculate completion percentage
+        completion = 0.0
+        if session.playback.duration > 0:
+            completion = session.playback.position / session.playback.duration
+        
+        if completion > 0.95:
+            return "restart_or_next"
+        elif days_since_last > 7:
+            return "show_recap"
+        else:
+            return "resume"
+
+    def record_watch_event(self, filepath: str, started_at: datetime, 
+                           ended_at: datetime, position_start: float, 
+                           position_end: float, episode_index: int = 0) -> None:
+        """
+        Records a watch event for statistics tracking.
+        Should be called when playback ends (either by user or end of media).
+        """
+        event = WatchEvent(
+            filepath=filepath,
+            started_at=started_at,
+            ended_at=ended_at,
+            position_start=position_start,
+            position_end=position_end,
+            episode_index=episode_index
+        )
+        
+        # If repository supports watch events, record it
+        if hasattr(self.repository, 'record_watch_event'):
+            self.repository.record_watch_event(event)
+
+    def has_next_episode(self, session: Session) -> bool:
+        """Check if there's a next episode available."""
+        series_files = self.get_series_files(session)
+        if not series_files:
+            return False
+        return session.playback.last_played_index < len(series_files) - 1
+
+    def get_next_episode_info(self, session: Session) -> Optional[Tuple[int, str]]:
+        """Get next episode index and filename if available."""
+        series_files = self.get_series_files(session)
+        if not series_files:
+            return None
+        
+        next_index = session.playback.last_played_index + 1
+        if next_index < len(series_files):
+            return (next_index, os.path.basename(series_files[next_index]))
+        return None
+

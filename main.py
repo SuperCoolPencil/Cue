@@ -18,12 +18,17 @@ except ImportError:
 
 # Local application imports
 from core.services import LibraryService
-from core.repository import JsonRepository
+from core.sqlite_repository import SqliteRepository
 from core.drivers.mpv_driver import MpvDriver
 from core.drivers.vlc_driver import VlcDriver
 from core.drivers.ipc_driver import PlayerDriver
-from core.settings import load_settings, save_settings, SESSIONS_PATH
+from core.settings import load_settings, save_settings, SESSIONS_PATH, DATABASE_PATH
 from core.utils import format_seconds_to_human_readable
+from core.stats import StatsService
+from core.migration import run_migration_if_needed
+
+# Run migration on startup (one-time, from JSON to SQLite)
+run_migration_if_needed()
 
 # === CONSTANTS & CONFIGURATION ===
 PAGE_TITLE = "Cue"
@@ -106,8 +111,7 @@ def open_file_in_default_app(path: str):
 
 def get_library_service(settings: Dict) -> LibraryService:
     """Configures and returns the LibraryService based on current settings."""
-    storage_file = SESSIONS_PATH
-    repository = JsonRepository(storage_file)
+    repository = SqliteRepository(DATABASE_PATH)
     
     player_type = settings.get('player_type', 'mpv_native')
     player_executable = settings.get('player_executable', 'mpv')
@@ -133,31 +137,41 @@ def save_title_and_exit_edit_mode(path: str, k_id: int, library_service: Library
 # === COMPONENT RENDERERS ===
 def render_sidebar(settings: Dict):
     with st.sidebar:
-        st.markdown("### Library")
+        # Page Navigation
+        if 'current_page' not in st.session_state:
+            st.session_state.current_page = 'library'
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Library", use_container_width=True, 
+                        type="primary" if st.session_state.current_page == 'library' else "secondary"):
+                st.session_state.current_page = 'library'
+                st.rerun()
+        with col2:
+            if st.button("Stats", use_container_width=True,
+                        type="primary" if st.session_state.current_page == 'stats' else "secondary"):
+                st.session_state.current_page = 'stats'
+                st.rerun()
+        
+        st.markdown("---")
         
         # File Operations
-        if st.button("📂 Open Folder", use_container_width=True):
+        if st.button("Open Folder", use_container_width=True):
             if p := open_file_dialog(select_folder=True):
                 st.session_state['pending_play'] = p
+                st.session_state.current_page = 'library'
                 st.rerun()
                 
-        if st.button("📄 Open File", use_container_width=True):
+        if st.button("Open File", use_container_width=True):
             if p := open_file_dialog(select_folder=False):
                 st.session_state['pending_play'] = p
+                st.session_state.current_page = 'library'
                 st.rerun()
-        
-        # === UPDATED BUTTON ===
-        if st.button("📝 Edit Database", use_container_width=True, help="Open sessions.json in default editor"):
-            db_path = SESSIONS_PATH
-            if db_path.exists():
-                open_file_in_default_app(str(db_path))
-            else:
-                st.warning("Database file not found. Play a video to create it.")
         
         st.markdown("<br>", unsafe_allow_html=True)
         
         # Settings
-        with st.expander("⚙️ Preferences"):
+        with st.expander("Preferences"):
             # Initialize session state defaults for settings
             if 'w_exe' not in st.session_state: 
                 st.session_state.w_exe = settings.get('player_executable', 'mpv')
@@ -179,7 +193,7 @@ def render_sidebar(settings: Dict):
                 save_settings(settings)
                 st.rerun()
                 
-        if st.button("🛑 Quit", type="secondary", use_container_width=True): 
+        if st.button("Quit", type="secondary", use_container_width=True): 
             os._exit(0)
 
 def render_card(path: str, session, library_service: LibraryService):
@@ -233,8 +247,22 @@ def render_card(path: str, session, library_service: LibraryService):
         with col_actions:
             st.write("") # Spacer for vertical alignment
             
-            # 1. Primary Action: Resume/Replay
-            play_label = "↺ Replay" if is_done else "▶ Resume"
+            # 1. Primary Action: Intelligent Resume
+            resume_action = library_service.get_resume_action(session)
+            
+            if resume_action == "restart_or_next":
+                # Show next episode if available, otherwise restart option
+                if is_folder and library_service.has_next_episode(session):
+                    next_info = library_service.get_next_episode_info(session)
+                    if next_info:
+                        play_label = f"▶ Next: EP {next_info[0] + 1}"
+                else:
+                    play_label = "↺ Restart"
+            elif resume_action == "show_recap":
+                play_label = "▶ Resume (1w+ ago)"
+            else:
+                play_label = "↺ Replay" if is_done else "▶ Resume"
+            
             if st.button(play_label, key=f"play_{k_id}", use_container_width=True):
                 st.session_state['resume_data'] = path
                 st.rerun()
@@ -278,6 +306,141 @@ def render_card(path: str, session, library_service: LibraryService):
 
     st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
 
+
+def render_stats_page(library_service: LibraryService):
+    """Renders the statistics dashboard page."""
+    st.markdown('<div class="main-header">Stats.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Your viewing analytics and watch history</div>', unsafe_allow_html=True)
+    
+    stats_service = StatsService(library_service.repository)
+    stats = stats_service.get_all_stats()
+    
+    # === Summary Metrics as Cards ===
+    watch_time_str = stats_service.format_watch_time(stats.total_watch_time)
+    completion_pct = f"{stats.completion_rate * 100:.0f}%"
+    
+    metrics_html = f'''
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{stats.library_size}</div>
+            <div class="stat-label">Library Items</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{stats.completed_count}</div>
+            <div class="stat-label">Completed</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{completion_pct}</div>
+            <div class="stat-label">Completion Rate</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{watch_time_str if watch_time_str else "0s"}</div>
+            <div class="stat-label">Watch Time</div>
+        </div>
+    </div>
+    '''
+    st.markdown(metrics_html, unsafe_allow_html=True)
+    
+    st.markdown("<div style='height: 2rem'></div>", unsafe_allow_html=True)
+    
+    # === Watch Streak Calendar ===
+    streak_header = '<div class="section-header">Activity</div>'
+    st.markdown(streak_header, unsafe_allow_html=True)
+    
+    from datetime import datetime, timedelta
+    
+    current_streak = stats_service.get_current_streak(stats.watch_streak) if stats.watch_streak else 0
+    
+    today = datetime.now().date()
+    start_date = today - timedelta(days=364)
+    
+    # Build week-based grid (GitHub style)
+    calendar_html = f'''
+    <div class="streak-container">
+        <div class="streak-info">
+            <span class="streak-count">{current_streak}</span>
+            <span class="streak-label">day streak</span>
+        </div>
+        <div class="streak-calendar">
+    '''
+    
+    current_date = start_date
+    while current_date.weekday() != 6:
+        current_date -= timedelta(days=1)
+    
+    for week in range(53):
+        calendar_html += '<div class="streak-week">'
+        for day in range(7):
+            date_str = current_date.isoformat()
+            minutes = stats.watch_streak.get(date_str, 0) if stats.watch_streak else 0
+            level = stats_service.get_streak_level(minutes)
+            tooltip = f"{date_str}: {minutes}m" if minutes else date_str
+            calendar_html += f'<div class="streak-day level-{level}" title="{tooltip}"></div>'
+            current_date += timedelta(days=1)
+        calendar_html += '</div>'
+    
+    calendar_html += '</div></div>'
+    st.markdown(calendar_html, unsafe_allow_html=True)
+    
+    st.markdown("<div style='height: 2rem'></div>", unsafe_allow_html=True)
+    
+    # === Two Column Layout ===
+    col_left, col_right = st.columns(2, gap="medium")
+    
+    # === Most Watched ===
+    with col_left:
+        st.markdown('<div class="section-header">Most Watched</div>', unsafe_allow_html=True)
+        
+        if stats.most_watched and any(t[1] > 0 for t in stats.most_watched):
+            max_time = max(t[1] for t in stats.most_watched) if stats.most_watched else 1
+            
+            rankings_html = '<div class="rankings-list">'
+            for i, (title, watch_time) in enumerate(stats.most_watched[:5], 1):
+                if watch_time <= 0:
+                    continue
+                progress_pct = (watch_time / max_time * 100) if max_time > 0 else 0
+                time_str = stats_service.format_watch_time(watch_time)
+                rankings_html += f'''
+                <div class="ranking-item">
+                    <div class="ranking-header">
+                        <span class="ranking-position">{i}</span>
+                        <span class="ranking-title">{title}</span>
+                        <span class="ranking-time">{time_str}</span>
+                    </div>
+                    <div class="ranking-bar-bg">
+                        <div class="ranking-bar" style="width: {progress_pct}%"></div>
+                    </div>
+                </div>
+                '''
+            rankings_html += '</div>'
+            st.markdown(rankings_html, unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="empty-state">No watch data recorded yet</div>', unsafe_allow_html=True)
+    
+    # === Viewing Patterns ===
+    with col_right:
+        st.markdown('<div class="section-header">Viewing Patterns</div>', unsafe_allow_html=True)
+        
+        if stats.viewing_patterns and any(v > 0 for v in stats.viewing_patterns.values()):
+            max_minutes = max(stats.viewing_patterns.values())
+            
+            pattern_html = '<div class="patterns-container"><div class="viewing-patterns">'
+            for hour in range(24):
+                minutes = stats.viewing_patterns.get(hour, 0)
+                height_pct = (minutes / max_minutes * 100) if max_minutes > 0 else 0
+                time_label = f"{hour:02d}:00"
+                pattern_html += f'''
+                    <div class="pattern-bar-container" title="{time_label}: {int(minutes)}m">
+                        <div class="pattern-bar" style="height: {height_pct}%"></div>
+                    </div>
+                '''
+            pattern_html += '</div>'
+            pattern_html += '<div class="pattern-labels"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span></div>'
+            pattern_html += '</div>'
+            st.markdown(pattern_html, unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="empty-state">No viewing pattern data yet</div>', unsafe_allow_html=True)
+
 # === MAIN ENTRY POINT ===
 def main():
     settings = load_settings()
@@ -303,23 +466,30 @@ def main():
     # UI Rendering
     render_sidebar(settings)
     
-    st.markdown('<div class="main-header">Cue.</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="sub-header">Resume where you left off • {len(st.session_state.sessions)} items</div>', unsafe_allow_html=True)
-
-    sessions = st.session_state.sessions
-    query = st.text_input("Search", placeholder="Filter your library...", label_visibility="collapsed")
+    # Get current page (default to library)
+    current_page = st.session_state.get('current_page', 'library')
     
-    items = sorted(
-        [i for i in sessions.items() if query.lower() in str(i).lower()],
-        key=lambda x: x[1].playback.timestamp, 
-        reverse=True
-    )
+    if current_page == 'stats':
+        render_stats_page(library_service)
+    else:
+        # Library Page
+        st.markdown('<div class="main-header">Cue.</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="sub-header">Resume where you left off • {len(st.session_state.sessions)} items</div>', unsafe_allow_html=True)
 
-    if not items: 
-        st.info("📚 Your library is empty. Click 'Open Folder' or 'Open File' to get started.")
-    else: 
-        for path, session in items: 
-            render_card(path, session, library_service)
+        sessions = st.session_state.sessions
+        query = st.text_input("Search", placeholder="Filter your library...", label_visibility="collapsed")
+        
+        items = sorted(
+            [i for i in sessions.items() if query.lower() in str(i).lower()],
+            key=lambda x: x[1].playback.timestamp, 
+            reverse=True
+        )
+
+        if not items: 
+            st.info("📚 Your library is empty. Click 'Open Folder' or 'Open File' to get started.")
+        else: 
+            for path, session in items: 
+                render_card(path, session, library_service)
 
 if __name__ == "__main__":
     main()
