@@ -230,16 +230,24 @@ def render_card(session_id: str, session, library_service):
     with st.container():
         # Layout with optional poster
         if session.metadata.poster_path:
-            col_poster, col_info, col_actions = st.columns([0.15, 0.57, 0.28], gap="small")
+            col_poster, col_info, col_actions = st.columns([0.18, 0.59, 0.23], gap="small")
             
             with col_poster:
                 st.markdown(f'''<div class="card-poster">
                     <img src="{session.metadata.poster_path}" alt="Poster" />
                 </div>''', unsafe_allow_html=True)
         else:
-            col_info, col_actions = st.columns([0.72, 0.28], gap="small")
+            col_info, col_actions = st.columns([0.75, 0.25], gap="small")
         
         with col_info:
+            # Calculate progress percentage
+            progress_pct = (pos / dur * 100) if dur > 0 else 0
+            progress_bar_html = ""
+            if progress_pct > 0:
+                progress_bar_html = f'''<div class="card-progress-container">
+                    <div class="card-progress-fill" style="width: {progress_pct}%"></div>
+                </div>'''
+
             html_info = f"""<div class="cue-card">
 <div class="card-header">
 <div class="card-title">{display_name}</div>
@@ -252,6 +260,7 @@ def render_card(session_id: str, session, library_service):
 <span>{format_seconds_to_human_readable(pos)} / {format_seconds_to_human_readable(dur)}</span>
 <span class="time-remaining">{'Finished' if is_done else f"{format_seconds_to_human_readable(dur - pos)} left in episode"}</span>
 </div>
+{progress_bar_html}
 </div>"""
             st.markdown(html_info, unsafe_allow_html=True)
         
