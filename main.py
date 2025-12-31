@@ -27,9 +27,6 @@ from core.utils import format_seconds_to_human_readable
 from core.stats import StatsService
 from core.migration import run_migration_if_needed
 
-# Run migration on startup (one-time, from JSON to SQLite)
-run_migration_if_needed()
-
 # === CONSTANTS & CONFIGURATION ===
 PAGE_TITLE = "Cue"
 PAGE_ICON = "⏯️"
@@ -231,16 +228,14 @@ def render_card(path: str, session, library_service: LibraryService):
         
         # === INFORMATION COLUMN ===
         with col_info:
-            html_info = f"""
-            <div class="cue-card">
-                <div class="card-title">{display_name}</div>
-                <div class="badge-container">{"".join(badges)}</div>
-                <div class="stats-row">
-                    <span>{format_seconds_to_human_readable(pos)} / {format_seconds_to_human_readable(dur)}</span>
-                    <span class="time-remaining">{'Finished' if is_done else f"{format_seconds_to_human_readable(dur - pos)} left in episode"}</span>
-                </div>
-            </div>
-            """
+            html_info = f"""<div class="cue-card">
+<div class="card-title">{display_name}</div>
+<div class="badge-container">{"".join(badges)}</div>
+<div class="stats-row">
+<span>{format_seconds_to_human_readable(pos)} / {format_seconds_to_human_readable(dur)}</span>
+<span class="time-remaining">{'Finished' if is_done else f"{format_seconds_to_human_readable(dur - pos)} left in episode"}</span>
+</div>
+</div>"""
             st.markdown(html_info, unsafe_allow_html=True)
         
         # === ACTIONS COLUMN ===
@@ -319,26 +314,24 @@ def render_stats_page(library_service: LibraryService):
     watch_time_str = stats_service.format_watch_time(stats.total_watch_time)
     completion_pct = f"{stats.completion_rate * 100:.0f}%"
     
-    metrics_html = f'''
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="stat-value">{stats.library_size}</div>
-            <div class="stat-label">Library Items</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-value">{stats.completed_count}</div>
-            <div class="stat-label">Completed</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-value">{completion_pct}</div>
-            <div class="stat-label">Completion Rate</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-value">{watch_time_str if watch_time_str else "0s"}</div>
-            <div class="stat-label">Watch Time</div>
-        </div>
-    </div>
-    '''
+    metrics_html = f'''<div class="stats-grid">
+<div class="stat-card">
+<div class="stat-value">{stats.library_size}</div>
+<div class="stat-label">Library Items</div>
+</div>
+<div class="stat-card">
+<div class="stat-value">{stats.completed_count}</div>
+<div class="stat-label">Completed</div>
+</div>
+<div class="stat-card">
+<div class="stat-value">{completion_pct}</div>
+<div class="stat-label">Completion Rate</div>
+</div>
+<div class="stat-card">
+<div class="stat-value">{watch_time_str if watch_time_str else "0s"}</div>
+<div class="stat-label">Watch Time</div>
+</div>
+</div>'''
     st.markdown(metrics_html, unsafe_allow_html=True)
     
     st.markdown("<div style='height: 2rem'></div>", unsafe_allow_html=True)
@@ -355,14 +348,12 @@ def render_stats_page(library_service: LibraryService):
     start_date = today - timedelta(days=364)
     
     # Build week-based grid (GitHub style)
-    calendar_html = f'''
-    <div class="streak-container">
-        <div class="streak-info">
-            <span class="streak-count">{current_streak}</span>
-            <span class="streak-label">day streak</span>
-        </div>
-        <div class="streak-calendar">
-    '''
+    calendar_html = f'''<div class="streak-container">
+<div class="streak-info">
+<span class="streak-count">{current_streak}</span>
+<span class="streak-label">day streak</span>
+</div>
+<div class="streak-calendar">'''
     
     current_date = start_date
     while current_date.weekday() != 6:
@@ -400,18 +391,16 @@ def render_stats_page(library_service: LibraryService):
                     continue
                 progress_pct = (watch_time / max_time * 100) if max_time > 0 else 0
                 time_str = stats_service.format_watch_time(watch_time)
-                rankings_html += f'''
-                <div class="ranking-item">
-                    <div class="ranking-header">
-                        <span class="ranking-position">{i}</span>
-                        <span class="ranking-title">{title}</span>
-                        <span class="ranking-time">{time_str}</span>
-                    </div>
-                    <div class="ranking-bar-bg">
-                        <div class="ranking-bar" style="width: {progress_pct}%"></div>
-                    </div>
-                </div>
-                '''
+                rankings_html += f'''<div class="ranking-item">
+<div class="ranking-header">
+<span class="ranking-position">{i}</span>
+<span class="ranking-title">{title}</span>
+<span class="ranking-time">{time_str}</span>
+</div>
+<div class="ranking-bar-bg">
+<div class="ranking-bar" style="width: {progress_pct}%"></div>
+</div>
+</div>'''
             rankings_html += '</div>'
             st.markdown(rankings_html, unsafe_allow_html=True)
         else:
@@ -429,11 +418,9 @@ def render_stats_page(library_service: LibraryService):
                 minutes = stats.viewing_patterns.get(hour, 0)
                 height_pct = (minutes / max_minutes * 100) if max_minutes > 0 else 0
                 time_label = f"{hour:02d}:00"
-                pattern_html += f'''
-                    <div class="pattern-bar-container" title="{time_label}: {int(minutes)}m">
-                        <div class="pattern-bar" style="height: {height_pct}%"></div>
-                    </div>
-                '''
+                pattern_html += f'''<div class="pattern-bar-container" title="{time_label}: {int(minutes)}m">
+<div class="pattern-bar" style="height: {height_pct}%"></div>
+</div>'''
             pattern_html += '</div>'
             pattern_html += '<div class="pattern-labels"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span></div>'
             pattern_html += '</div>'
