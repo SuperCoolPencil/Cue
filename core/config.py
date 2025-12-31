@@ -36,3 +36,16 @@ MOST_WATCHED_LIMIT = 10
 
 # Number of items to show in watch history
 WATCH_HISTORY_LIMIT = 50
+
+# === Metadata Configuration ===
+
+# TMDB API settings - can be overridden via TMDB_API_KEY environment variable
+import os
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "1f79ab14926c11fa2a58f30d05e4dada")
+TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/"
+TMDB_POSTER_SIZE = "w500"
+TMDB_BACKDROP_SIZE = "w1280"
+
+# Days before re-fetching metadata (0 = never re-fetch)
+METADATA_CACHE_DAYS = 30
+

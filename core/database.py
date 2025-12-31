@@ -15,7 +15,15 @@ CREATE TABLE IF NOT EXISTS sessions (
     genres TEXT,
     rating REAL,
     description TEXT,
-    poster_path TEXT
+    poster_path TEXT,
+    -- Extended metadata from TMDB
+    year INTEGER,
+    tmdb_id INTEGER,
+    backdrop_path TEXT,
+    vote_average REAL,
+    vote_count INTEGER,
+    runtime_minutes INTEGER,
+    is_metadata_fetched INTEGER DEFAULT 0
 );
 
 -- Playback state (current position per session)
@@ -46,6 +54,17 @@ CREATE INDEX IF NOT EXISTS idx_watch_events_session_id ON watch_events(session_i
 CREATE INDEX IF NOT EXISTS idx_sessions_filepath ON sessions(filepath);
 """
 
+# New columns to add during migration
+MIGRATION_COLUMNS = [
+    ("year", "INTEGER"),
+    ("tmdb_id", "INTEGER"),
+    ("backdrop_path", "TEXT"),
+    ("vote_average", "REAL"),
+    ("vote_count", "INTEGER"),
+    ("runtime_minutes", "INTEGER"),
+    ("is_metadata_fetched", "INTEGER DEFAULT 0"),
+]
+
 
 class Database:
     """SQLite database connection manager for Cue."""
@@ -53,6 +72,7 @@ class Database:
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self._init_schema()
+        self._run_migrations()
     
     @contextmanager
     def connection(self) -> Generator[sqlite3.Connection, None, None]:
@@ -73,3 +93,16 @@ class Database:
         """Initialize database schema."""
         with self.connection() as conn:
             conn.executescript(SCHEMA)
+    
+    def _run_migrations(self) -> None:
+        """Add any missing columns to sessions table."""
+        with self.connection() as conn:
+            # Get existing columns
+            cursor = conn.execute("PRAGMA table_info(sessions)")
+            existing_columns = {row["name"] for row in cursor.fetchall()}
+            
+            # Add missing columns
+            for col_name, col_type in MIGRATION_COLUMNS:
+                if col_name not in existing_columns:
+                    conn.execute(f"ALTER TABLE sessions ADD COLUMN {col_name} {col_type}")
+

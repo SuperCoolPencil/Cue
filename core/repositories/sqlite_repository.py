@@ -34,7 +34,15 @@ class SqliteRepository(IRepository):
             genres=genres,
             rating=row['rating'],
             description=row['description'],
-            poster_path=row['poster_path']
+            poster_path=row['poster_path'],
+            # Extended TMDB metadata
+            year=row['year'] if 'year' in row.keys() else None,
+            tmdb_id=row['tmdb_id'] if 'tmdb_id' in row.keys() else None,
+            backdrop_path=row['backdrop_path'] if 'backdrop_path' in row.keys() else None,
+            vote_average=row['vote_average'] if 'vote_average' in row.keys() else None,
+            vote_count=row['vote_count'] if 'vote_count' in row.keys() else None,
+            runtime_minutes=row['runtime_minutes'] if 'runtime_minutes' in row.keys() else None,
+            is_metadata_fetched=bool(row['is_metadata_fetched']) if 'is_metadata_fetched' in row.keys() else False
         )
         
         playback = PlaybackState(
@@ -58,6 +66,8 @@ class SqliteRepository(IRepository):
             rows = conn.execute("""
                 SELECT s.id, s.filepath, s.clean_title, s.season_number, s.is_user_locked_title,
                        s.genres, s.rating, s.description, s.poster_path,
+                       s.year, s.tmdb_id, s.backdrop_path, s.vote_average, 
+                       s.vote_count, s.runtime_minutes, s.is_metadata_fetched,
                        p.last_played_file, p.last_played_index, p.position, 
                        p.duration, p.is_finished, p.timestamp
                 FROM sessions s
@@ -83,6 +93,8 @@ class SqliteRepository(IRepository):
             row = conn.execute("""
                 SELECT s.id, s.filepath, s.clean_title, s.season_number, s.is_user_locked_title,
                        s.genres, s.rating, s.description, s.poster_path,
+                       s.year, s.tmdb_id, s.backdrop_path, s.vote_average, 
+                       s.vote_count, s.runtime_minutes, s.is_metadata_fetched,
                        p.last_played_file, p.last_played_index, p.position, 
                        p.duration, p.is_finished, p.timestamp
                 FROM sessions s
@@ -102,8 +114,10 @@ class SqliteRepository(IRepository):
             conn.execute("""
                 INSERT INTO sessions 
                 (id, filepath, clean_title, season_number, is_user_locked_title,
-                 genres, rating, description, poster_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 genres, rating, description, poster_path,
+                 year, tmdb_id, backdrop_path, vote_average, vote_count, 
+                 runtime_minutes, is_metadata_fetched)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                 filepath=excluded.filepath,
                 clean_title=excluded.clean_title,
@@ -112,7 +126,14 @@ class SqliteRepository(IRepository):
                 genres=excluded.genres,
                 rating=excluded.rating,
                 description=excluded.description,
-                poster_path=excluded.poster_path
+                poster_path=excluded.poster_path,
+                year=excluded.year,
+                tmdb_id=excluded.tmdb_id,
+                backdrop_path=excluded.backdrop_path,
+                vote_average=excluded.vote_average,
+                vote_count=excluded.vote_count,
+                runtime_minutes=excluded.runtime_minutes,
+                is_metadata_fetched=excluded.is_metadata_fetched
             """, (
                 session.id,
                 session.filepath,
@@ -122,7 +143,14 @@ class SqliteRepository(IRepository):
                 json.dumps(session.metadata.genres),
                 session.metadata.rating,
                 session.metadata.description,
-                session.metadata.poster_path
+                session.metadata.poster_path,
+                session.metadata.year,
+                session.metadata.tmdb_id,
+                session.metadata.backdrop_path,
+                session.metadata.vote_average,
+                session.metadata.vote_count,
+                session.metadata.runtime_minutes,
+                int(session.metadata.is_metadata_fetched)
             ))
             
             # Upsert playback state

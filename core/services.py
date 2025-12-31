@@ -20,6 +20,7 @@ except ImportError:
 from core.domain import PlaybackState, MediaMetadata, Session, WatchEvent
 from core.interfaces import IPlayerDriver, IRepository
 from core.utils import get_media_files
+from core.providers.metadata_provider import get_metadata_provider, TMDBProvider
 
 class LibraryService:
     """
@@ -77,10 +78,87 @@ class LibraryService:
             is_user_locked_title=False # Initially not locked
         )
         new_session = Session(id=session_id, filepath=filepath, metadata=metadata)
+        
+        # Try to fetch TMDB metadata for new sessions
+        self._try_fetch_metadata(new_session)
+        
         self.repository.save_session(new_session) # Persist new session
         self.sessions[session_id] = new_session
         self._filepath_index[filepath] = session_id
         return new_session
+
+    def _try_fetch_metadata(self, session: Session) -> None:
+        """
+        Try to fetch metadata from TMDB for the session.
+        Only fetches if not already fetched and title is not user-locked.
+        """
+        print(f"DEBUG _try_fetch_metadata: Starting for '{session.metadata.clean_title}'")
+        print(f"DEBUG _try_fetch_metadata: is_fetched={session.metadata.is_metadata_fetched}, is_locked={session.metadata.is_user_locked_title}")
+        
+        if session.metadata.is_metadata_fetched:
+            print("DEBUG _try_fetch_metadata: Skipping - already fetched")
+            return
+        
+        provider = get_metadata_provider()
+        if not provider.is_configured:
+            print("DEBUG _try_fetch_metadata: TMDB API key not configured. Skipping.")
+            return
+        
+        # Use guessit to get year and media type hints
+        year = None
+        media_type = None
+        
+        if guessit:
+            try:
+                guessed = guessit(session.filepath)
+                year = guessed.get('year')
+                # Determine if it's a TV show or movie based on guessit
+                if guessed.get('type') == 'episode' or 'season' in guessed or 'episode' in guessed:
+                    media_type = 'tv'
+                else:
+                    media_type = 'movie'
+                print(f"DEBUG _try_fetch_metadata: Guessit result - year={year}, media_type={media_type}")
+            except Exception as e:
+                print(f"Guessit error during metadata fetch: {e}")
+        
+        try:
+            print(f"DEBUG _try_fetch_metadata: Calling provider.search('{session.metadata.clean_title}')")
+            info = provider.search(
+                title=session.metadata.clean_title,
+                year=year,
+                media_type=media_type
+            )
+            
+            if info:
+                print(f"DEBUG _try_fetch_metadata: Got result - {info.title}, poster={info.poster_path}")
+                # Update metadata with TMDB info
+                session.metadata.description = info.overview
+                session.metadata.poster_path = provider.get_poster_url(info.poster_path) if info.poster_path else None
+                session.metadata.backdrop_path = provider.get_backdrop_url(info.backdrop_path) if info.backdrop_path else None
+                session.metadata.genres = info.genres or []
+                session.metadata.vote_average = info.vote_average
+                session.metadata.vote_count = info.vote_count
+                session.metadata.year = info.year
+                session.metadata.tmdb_id = info.tmdb_id
+                session.metadata.runtime_minutes = info.runtime_minutes
+                session.metadata.is_metadata_fetched = True
+                print(f"DEBUG _try_fetch_metadata: Updated metadata - poster_path={session.metadata.poster_path}")
+            else:
+                # Mark as fetched even if not found to avoid repeated API calls
+                session.metadata.is_metadata_fetched = True
+                print(f"DEBUG _try_fetch_metadata: No TMDB results for: {session.metadata.clean_title}")
+        except Exception as e:
+            print(f"DEBUG _try_fetch_metadata: Error - {e}")
+
+    def refresh_metadata(self, session: Session) -> Session:
+        """
+        Force refresh metadata from TMDB, even if already fetched.
+        """
+        # Temporarily clear the fetched flag to allow re-fetch
+        session.metadata.is_metadata_fetched = False
+        self._try_fetch_metadata(session)
+        self.repository.save_session(session)
+        return session
 
     def update_session_metadata(self, filepath: str, clean_title: Optional[str] = None, 
                                 season_number: Optional[int] = None, 

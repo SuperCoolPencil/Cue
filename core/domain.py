@@ -36,6 +36,14 @@ class MediaMetadata:
     rating: Optional[float] = None
     description: Optional[str] = None
     poster_path: Optional[str] = None
+    # Extended metadata from TMDB
+    year: Optional[int] = None
+    tmdb_id: Optional[int] = None
+    backdrop_path: Optional[str] = None
+    vote_average: Optional[float] = None
+    vote_count: Optional[int] = None
+    runtime_minutes: Optional[int] = None
+    is_metadata_fetched: bool = False
 
 
 @dataclass

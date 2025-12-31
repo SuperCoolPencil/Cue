@@ -88,8 +88,13 @@ def render_card(session_id: str, session, library_service):
     is_done = (pos / dur > EPISODE_COMPLETION_THRESHOLD) if dur else False
     k_id = hash(session_id)
     
+    # Build badges
     badges = []
     badges.append(f'<span class="badge b-folder">{"SERIES" if is_folder else "MOVIE"}</span>')
+    
+    # Year badge
+    if session.metadata.year:
+        badges.append(f'<span class="badge b-year">{session.metadata.year}</span>')
     
     current_season = session.metadata.season_number
     if isinstance(current_season, list):
@@ -106,14 +111,46 @@ def render_card(session_id: str, session, library_service):
     
     if is_done: 
         badges.append('<span class="badge b-success">✓ COMPLETED</span>')
+    
+    # Rating badge
+    rating_html = ""
+    if session.metadata.vote_average and session.metadata.vote_average > 0:
+        rating = session.metadata.vote_average
+        rating_html = f'<span class="rating-badge">★ {rating:.1f}</span>'
+    
+    # Genres
+    genre_html = ""
+    if session.metadata.genres:
+        genre_tags = "".join([f'<span class="genre-tag">{g}</span>' for g in session.metadata.genres[:3]])
+        genre_html = f'<div class="genre-container">{genre_tags}</div>'
+    
+    # Description preview
+    desc_html = ""
+    if session.metadata.description:
+        desc_preview = session.metadata.description[:120] + "..." if len(session.metadata.description) > 120 else session.metadata.description
+        desc_html = f'<div class="description-preview">{desc_preview}</div>'
 
     with st.container():
-        col_info, col_actions = st.columns([0.72, 0.28], gap="small")
+        # Layout with optional poster
+        if session.metadata.poster_path:
+            col_poster, col_info, col_actions = st.columns([0.15, 0.57, 0.28], gap="small")
+            
+            with col_poster:
+                st.markdown(f'''<div class="card-poster">
+                    <img src="{session.metadata.poster_path}" alt="Poster" />
+                </div>''', unsafe_allow_html=True)
+        else:
+            col_info, col_actions = st.columns([0.72, 0.28], gap="small")
         
         with col_info:
             html_info = f"""<div class="cue-card">
+<div class="card-header">
 <div class="card-title">{display_name}</div>
+{rating_html}
+</div>
 <div class="badge-container">{"".join(badges)}</div>
+{genre_html}
+{desc_html}
 <div class="stats-row">
 <span>{format_seconds_to_human_readable(pos)} / {format_seconds_to_human_readable(dur)}</span>
 <span class="time-remaining">{'Finished' if is_done else f"{format_seconds_to_human_readable(dur - pos)} left in episode"}</span>
@@ -151,7 +188,6 @@ def render_card(session_id: str, session, library_service):
             with c_edit:
                 with st.popover("✎", use_container_width=True):
                     st.markdown("##### Edit Metadata")
-                    # Use a function to save metadata
                     new_title = st.text_input("Title", value=display_name, key=f"new_title_inp_{k_id}")
                     new_season = st.number_input(
                         "Season Number", 
@@ -160,23 +196,29 @@ def render_card(session_id: str, session, library_service):
                         key=f"new_season_inp_{k_id}"
                     )
                     
-                    if st.button("Save", key=f"save_title_{k_id}", use_container_width=True):
-                        library_service.update_session_metadata(
-                            path, 
-                            clean_title=new_title, 
-                            season_number=new_season, 
-                            is_user_locked_title=True
-                        )
-                        # Update the session in state for immediate feedback
-                        session.metadata.clean_title = new_title
-                        session.metadata.season_number = new_season
-                        st.rerun()
+                    col_save, col_refresh = st.columns(2)
+                    with col_save:
+                        if st.button("Save", key=f"save_title_{k_id}", use_container_width=True):
+                            library_service.update_session_metadata(
+                                path, 
+                                clean_title=new_title, 
+                                season_number=new_season, 
+                                is_user_locked_title=True
+                            )
+                            session.metadata.clean_title = new_title
+                            session.metadata.season_number = new_season
+                            st.rerun()
+                    
+                    with col_refresh:
+                        if st.button("🔄", key=f"refresh_{k_id}", use_container_width=True, help="Refresh from TMDB"):
+                            library_service.refresh_metadata(session)
+                            st.rerun()
 
             with c_del:
                 if st.session_state.get('confirm_del') == session_id:
                     if st.button("✓", key=f"y_{k_id}", use_container_width=True, help="Confirm Delete"):
                         library_service.repository.delete_session(session_id)
-                        st.session_state.sessions.pop(session_id, None)  # Safe delete, avoids KeyError
+                        st.session_state.sessions.pop(session_id, None)
                         st.session_state.pop('confirm_del', None)
                         st.rerun()
                 else:
