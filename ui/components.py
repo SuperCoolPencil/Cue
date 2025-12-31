@@ -169,8 +169,8 @@ def render_card(session_id: str, session, library_service):
                 if st.session_state.get('confirm_del') == session_id:
                     if st.button("✓", key=f"y_{k_id}", use_container_width=True, help="Confirm Delete"):
                         library_service.repository.delete_session(session_id)
-                        del st.session_state.sessions[session_id]
-                        del st.session_state['confirm_del']
+                        st.session_state.sessions.pop(session_id, None)  # Safe delete, avoids KeyError
+                        st.session_state.pop('confirm_del', None)
                         st.rerun()
                 else:
                     if st.button("✕", key=f"del_{k_id}", use_container_width=True, help="Remove from Library"):
