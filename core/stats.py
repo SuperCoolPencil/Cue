@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, TYPE_CHECKING
 
-from core.config import STREAK_LEVEL_THRESHOLDS
+from core.config import DEFAULT_STREAK_THRESHOLDS
 
 if TYPE_CHECKING:
     from core.sqlite_repository import SqliteRepository
@@ -28,16 +28,50 @@ class StatsService:
     
     def __init__(self, repository: 'SqliteRepository'):
         self.repo = repository
+        self._streak_thresholds = None  # Cached dynamic thresholds
+    
+    def _calculate_dynamic_thresholds(self, watch_streak: Dict[str, int]) -> List[int]:
+        """
+        Calculate streak level thresholds dynamically based on user's watch history.
+        Uses percentiles (25th, 50th, 75th, 90th) of non-zero daily watch times.
+        Returns [0, p25, p50, p75, p90] for levels 0-4.
+        """
+        # Get all non-zero daily watch times
+        daily_minutes = [v for v in watch_streak.values() if v > 0]
+        
+        if len(daily_minutes) < 5:
+            # Not enough data, use defaults
+            return DEFAULT_STREAK_THRESHOLDS
+        
+        # Sort for percentile calculation
+        daily_minutes.sort()
+        n = len(daily_minutes)
+        
+        def percentile(p):
+            idx = int(n * p / 100)
+            return daily_minutes[min(idx, n - 1)]
+        
+        return [
+            0,                    # Level 0: no watch
+            max(1, percentile(25)),   # Level 1: bottom quartile
+            percentile(50),       # Level 2: median
+            percentile(75),       # Level 3: upper quartile  
+            percentile(90),       # Level 4: top 10%
+        ]
     
     def get_all_stats(self) -> WatchStats:
         """Get all watch statistics in one call."""
         sessions = self.repo.load_all_sessions()
         completed = sum(1 for s in sessions.values() if s.playback.is_finished)
+        watch_streak = self.repo.get_streak_calendar(days=365)
+        
+        # Calculate dynamic thresholds from watch history
+        self._streak_thresholds = self._calculate_dynamic_thresholds(watch_streak)
         
         return WatchStats(
             total_watch_time=self.repo.get_total_watch_time(),
             most_watched=self.repo.get_most_watched(limit=10),
-            watch_streak=self.repo.get_streak_calendar(days=365),
+            watch_streak=watch_streak,
             completion_rate=completed / len(sessions) if sessions else 0.0,
             viewing_patterns=self.repo.get_viewing_patterns(),
             library_size=len(sessions),
@@ -48,15 +82,17 @@ class StatsService:
     def get_streak_level(self, minutes: int) -> int:
         """
         Convert minutes watched to a streak level (0-4) for heatmap display.
-        Uses thresholds from config.
+        Uses dynamically calculated thresholds based on user's watch history.
         """
+        thresholds = self._streak_thresholds or DEFAULT_STREAK_THRESHOLDS
+        
         if minutes == 0:
             return 0
-        elif minutes < STREAK_LEVEL_THRESHOLDS[2]:  # < 30 min
+        elif minutes < thresholds[2]:
             return 1
-        elif minutes < STREAK_LEVEL_THRESHOLDS[3]:  # < 60 min
+        elif minutes < thresholds[3]:
             return 2
-        elif minutes < STREAK_LEVEL_THRESHOLDS[4]:  # < 120 min
+        elif minutes < thresholds[4]:
             return 3
         else:
             return 4
