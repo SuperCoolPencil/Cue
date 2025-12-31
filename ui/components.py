@@ -13,6 +13,94 @@ DRIVER_DEFAULTS = {
     "vlc_rc": "vlc"
 }
 
+@st.dialog("Edit Metadata")
+def edit_metadata_dialog():
+    """Modal dialog for editing session metadata."""
+    modal_data = st.session_state.get('edit_modal_session')
+    if not modal_data:
+        st.rerun()
+        return
+    
+    session = modal_data['session']
+    session_id = modal_data['session_id']
+    display_name = modal_data['display_name']
+    current_season = modal_data['current_season']
+    path = modal_data['path']
+    library_service = modal_data['library_service']
+    
+    # Title input
+    new_title = st.text_input("Title", value=display_name, key="modal_title")
+    
+    # Season number
+    new_season = st.number_input(
+        "Season Number", 
+        min_value=1, 
+        value=current_season if current_season is not None else 1, 
+        key="modal_season"
+    )
+    
+    # Save and Refresh buttons
+    col_save, col_refresh = st.columns(2)
+    with col_save:
+        if st.button("Save", key="modal_save", use_container_width=True, type="primary"):
+            library_service.update_session_metadata(
+                path, 
+                clean_title=new_title, 
+                season_number=new_season, 
+                is_user_locked_title=True
+            )
+            session.metadata.clean_title = new_title
+            session.metadata.season_number = new_season
+            st.session_state.pop('edit_modal_session', None)
+            st.rerun()
+    
+    with col_refresh:
+        if st.button("Refresh", key="modal_refresh", use_container_width=True, help="Refresh from TMDB"):
+            library_service.refresh_metadata(session)
+            st.session_state.pop('edit_modal_session', None)
+            st.rerun()
+    
+    st.markdown("---")
+    st.markdown("**Fetch by TMDB ID**")
+    
+    # TMDB ID input
+    current_tmdb_id = session.metadata.tmdb_id or ""
+    new_tmdb_id = st.text_input(
+        "TMDB ID", 
+        value=str(current_tmdb_id) if current_tmdb_id else "",
+        key="modal_tmdb_id",
+        placeholder="e.g., 550 for Fight Club"
+    )
+    
+    # Media type selector
+    col_type1, col_type2 = st.columns(2)
+    with col_type1:
+        is_movie = st.button("Movie", key="modal_movie", use_container_width=True,
+                            type="primary" if st.session_state.get('modal_media_type', 'movie') == 'movie' else "secondary")
+        if is_movie:
+            st.session_state['modal_media_type'] = 'movie'
+    with col_type2:
+        is_tv = st.button("TV Show", key="modal_tv", use_container_width=True,
+                         type="primary" if st.session_state.get('modal_media_type') == 'tv' else "secondary")
+        if is_tv:
+            st.session_state['modal_media_type'] = 'tv'
+    
+    media_type = st.session_state.get('modal_media_type', 'movie')
+    
+    if st.button("Fetch by ID", key="modal_fetch", use_container_width=True):
+        if new_tmdb_id and new_tmdb_id.isdigit():
+            library_service.fetch_metadata_by_id(session, int(new_tmdb_id), media_type)
+            st.session_state.pop('edit_modal_session', None)
+            st.rerun()
+        else:
+            st.error("Please enter a valid TMDB ID")
+    
+    # Close button at the bottom
+    if st.button("Close", key="modal_close", use_container_width=True):
+        st.session_state.pop('edit_modal_session', None)
+        st.rerun()
+
+
 def render_sidebar(settings, current_page):
     """Renders the sidebar navigation and preferences."""
     with st.sidebar:
@@ -186,58 +274,16 @@ def render_card(session_id: str, session, library_service):
                     open_in_file_manager(path)
 
             with c_edit:
-                with st.popover("✎", use_container_width=True):
-                    st.markdown("##### Edit Metadata")
-                    new_title = st.text_input("Title", value=display_name, key=f"new_title_inp_{k_id}")
-                    new_season = st.number_input(
-                        "Season Number", 
-                        min_value=1, 
-                        value=current_season if current_season is not None else 1, 
-                        key=f"new_season_inp_{k_id}"
-                    )
-                    
-                    col_save, col_refresh = st.columns(2)
-                    with col_save:
-                        if st.button("Save", key=f"save_title_{k_id}", use_container_width=True):
-                            library_service.update_session_metadata(
-                                path, 
-                                clean_title=new_title, 
-                                season_number=new_season, 
-                                is_user_locked_title=True
-                            )
-                            session.metadata.clean_title = new_title
-                            session.metadata.season_number = new_season
-                            st.rerun()
-                    
-                    with col_refresh:
-                        if st.button("🔄", key=f"refresh_{k_id}", use_container_width=True, help="Refresh from TMDB"):
-                            library_service.refresh_metadata(session)
-                            st.rerun()
-                    
-                    st.markdown("---")
-                    st.markdown("##### Fetch by TMDB ID")
-                    current_tmdb_id = session.metadata.tmdb_id or ""
-                    new_tmdb_id = st.text_input(
-                        "TMDB ID", 
-                        value=str(current_tmdb_id) if current_tmdb_id else "",
-                        key=f"tmdb_id_inp_{k_id}",
-                        placeholder="e.g., 550 for Fight Club"
-                    )
-                    
-                    # Media type selector for TMDB fetch
-                    media_type = st.radio(
-                        "Type",
-                        ["movie", "tv"],
-                        horizontal=True,
-                        key=f"media_type_{k_id}"
-                    )
-                    
-                    if st.button("Fetch by ID", key=f"fetch_tmdb_{k_id}", use_container_width=True):
-                        if new_tmdb_id and new_tmdb_id.isdigit():
-                            library_service.fetch_metadata_by_id(session, int(new_tmdb_id), media_type)
-                            st.rerun()
-                        else:
-                            st.error("Please enter a valid TMDB ID")
+                if st.button("✎", key=f"edit_{k_id}", help="Edit Metadata", use_container_width=True):
+                    st.session_state['edit_modal_session'] = {
+                        'session_id': session_id,
+                        'session': session,
+                        'display_name': display_name,
+                        'current_season': current_season,
+                        'path': path,
+                        'library_service': library_service
+                    }
+                    st.rerun()
 
             with c_del:
                 if st.session_state.get('confirm_del') == session_id:

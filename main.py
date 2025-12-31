@@ -1,7 +1,7 @@
 import os
 import streamlit as st
 from core.app_context import app
-from ui.components import render_sidebar, render_card, render_stats_page
+from ui.components import render_sidebar, render_card, render_stats_page, edit_metadata_dialog
 
 # === INITIALIZATION ===
 def load_css(file_name=os.path.join(os.path.abspath(os.path.dirname(__file__)), "styles.css")):
@@ -48,6 +48,10 @@ def main():
     
     # Sidebar
     render_sidebar(app.settings, current_page)
+    
+    # Show Edit Metadata modal if triggered
+    if 'edit_modal_session' in st.session_state:
+        edit_metadata_dialog()
     
     if current_page == 'stats':
         render_stats_page(app.stats_service, app.library_service)
