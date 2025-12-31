@@ -147,6 +147,8 @@ class LibraryService:
                 index_to_play = 0
                 start_time = 0.0
         
+        watch_start_time = datetime.now()
+        
         final_playback_state_from_driver = self.player_driver.launch(
             playlist=series_files,
             start_index=index_to_play,
@@ -155,73 +157,21 @@ class LibraryService:
         
         watch_end_time = datetime.now()
         
-        # --- Handle Multi-File Watch Events ---
-        final_index = final_playback_state_from_driver.last_played_index
+        # Calculate actual wall clock duration
+        total_wall_clock_seconds = (watch_end_time - watch_start_time).total_seconds()
         
-        # NOTE: MPV driver might not return perfect index if paths are tricky, 
-        # but let's trust the logic we have or the one returned.
-        # If the driver didn't return a valid index, we try to match it below, 
-        # but for calculation we need it now.
-        if final_playback_state_from_driver.last_played_file:
-             for i, file_in_series in enumerate(series_files):
-                 if (final_playback_state_from_driver.last_played_file in file_in_series) or \
-                    (file_in_series in final_playback_state_from_driver.last_played_file):
-                     final_index = i
-                     break
-        
-        # --- REVERSE CHAINING for Sequential Consistency ---
-        # We iterate BACKWARDS from final_index to index_to_play.
-        # The start of the current file becomes the end of the previous file.
-        # This ensures no overlapping timestamps in the database.
-        
-        current_event_end_time = watch_end_time
-        
-        # Generate range in reverse: final_index, final_index-1, ..., index_to_play
-        if final_index >= index_to_play:
-            indices_watched = range(final_index, index_to_play - 1, -1)
-        else:
-            # Fallback if somehow index went backwards (user manually picked previous in playlist?)
-            indices_watched = [final_index]
-
-        for i in indices_watched:
-            # Determine Start/End POSITIONS (Media Time)
-            current_start_pos = start_time if i == index_to_play else 0.0
-            
-            if i == final_index:
-                # This is the last file watched - use position from driver
-                current_end_pos = final_playback_state_from_driver.position
-            else:
-                # This is an intermediate file (fully watched)
-                # TODO: Consider caching durations to avoid repeated ffprobe calls
-                from core.utils import get_media_duration
-                full_duration = get_media_duration(series_files[i])
-                current_end_pos = full_duration if full_duration > 0 else 0.0
-
-            media_duration = current_end_pos - current_start_pos
-            
-            # Calculate Wall-Clock timestamps using reverse chaining
-            # NOTE: This assumes 1.0x playback speed and no pauses, but it guarantees
-            # events don't overlap in the DB (sequential consistency).
-            event_duration_seconds = media_duration
-            current_event_start_time = current_event_end_time - timedelta(seconds=event_duration_seconds)
-            
-            print(f"DEBUG: Watch Event (Index {i}) - Media: {current_start_pos:.1f}s-{current_end_pos:.1f}s, "
-                  f"Wall: {current_event_start_time.strftime('%H:%M:%S')}-{current_event_end_time.strftime('%H:%M:%S')}")
-
-            if media_duration > 1.0:  # Filter noise
-                self.record_watch_event(
-                    session_id=session.id,
-                    started_at=current_event_start_time,
-                    ended_at=current_event_end_time,
-                    position_start=current_start_pos,
-                    position_end=current_end_pos,
-                    episode_index=i
-                )
-            elif media_duration <= 0:
-                print(f"DEBUG: Skipping invalid duration for index {i}: {media_duration}")
-            
-            # Chain: The start of this episode becomes the end of the previous episode
-            current_event_end_time = current_event_start_time
+        # --- Record Single Watch Event with Wall Clock Time ---
+        # We only care about total time spent, not per-episode breakdown
+        if total_wall_clock_seconds > 1.0:  # Filter noise
+            self.record_watch_event(
+                session_id=session.id,
+                started_at=watch_start_time,
+                ended_at=watch_end_time,
+                position_start=start_time,
+                position_end=final_playback_state_from_driver.position,
+                episode_index=final_playback_state_from_driver.last_played_index
+            )
+            print(f"DEBUG: Watch event recorded - Wall clock: {total_wall_clock_seconds:.1f}s")
         
         # Update the session's playback state
         session.playback.position = final_playback_state_from_driver.position
