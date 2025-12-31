@@ -160,6 +160,61 @@ class LibraryService:
         self.repository.save_session(session)
         return session
 
+    def fetch_metadata_by_id(self, session: Session, tmdb_id: int, media_type: str = "movie") -> Session:
+        """
+        Fetch metadata from TMDB using a specific TMDB ID.
+        This allows manual override when auto-search fails.
+        """
+        print(f"DEBUG fetch_metadata_by_id: Fetching {media_type}/{tmdb_id}")
+        
+        provider = get_metadata_provider()
+        if not provider.is_configured:
+            print("DEBUG fetch_metadata_by_id: TMDB API key not configured")
+            return session
+        
+        try:
+            # Directly fetch details by ID
+            details = provider._get(f"{media_type}/{tmdb_id}")
+            
+            if details:
+                print(f"DEBUG fetch_metadata_by_id: Got result - {details.get('title') or details.get('name')}")
+                
+                # Get genres as names
+                genres = [g.get('name') for g in details.get('genres', [])]
+                
+                # Extract year
+                date_str = details.get('release_date') or details.get('first_air_date', '')
+                year = int(date_str[:4]) if date_str and len(date_str) >= 4 else None
+                
+                # Get runtime
+                if media_type == "movie":
+                    runtime = details.get("runtime")
+                else:
+                    runtimes = details.get("episode_run_time", [])
+                    runtime = runtimes[0] if runtimes else None
+                
+                # Update metadata
+                session.metadata.clean_title = details.get('title') or details.get('name') or session.metadata.clean_title
+                session.metadata.description = details.get('overview')
+                session.metadata.poster_path = provider.get_poster_url(details.get('poster_path')) if details.get('poster_path') else None
+                session.metadata.backdrop_path = provider.get_backdrop_url(details.get('backdrop_path')) if details.get('backdrop_path') else None
+                session.metadata.genres = genres
+                session.metadata.vote_average = details.get('vote_average')
+                session.metadata.vote_count = details.get('vote_count')
+                session.metadata.year = year
+                session.metadata.tmdb_id = tmdb_id
+                session.metadata.runtime_minutes = runtime
+                session.metadata.is_metadata_fetched = True
+                
+                self.repository.save_session(session)
+                print(f"DEBUG fetch_metadata_by_id: Updated metadata for {session.metadata.clean_title}")
+            else:
+                print(f"DEBUG fetch_metadata_by_id: No results for {media_type}/{tmdb_id}")
+        except Exception as e:
+            print(f"DEBUG fetch_metadata_by_id: Error - {e}")
+        
+        return session
+
     def update_session_metadata(self, filepath: str, clean_title: Optional[str] = None, 
                                 season_number: Optional[int] = None, 
                                 is_user_locked_title: Optional[bool] = None) -> Session:

@@ -213,6 +213,31 @@ def render_card(session_id: str, session, library_service):
                         if st.button("🔄", key=f"refresh_{k_id}", use_container_width=True, help="Refresh from TMDB"):
                             library_service.refresh_metadata(session)
                             st.rerun()
+                    
+                    st.markdown("---")
+                    st.markdown("##### Fetch by TMDB ID")
+                    current_tmdb_id = session.metadata.tmdb_id or ""
+                    new_tmdb_id = st.text_input(
+                        "TMDB ID", 
+                        value=str(current_tmdb_id) if current_tmdb_id else "",
+                        key=f"tmdb_id_inp_{k_id}",
+                        placeholder="e.g., 550 for Fight Club"
+                    )
+                    
+                    # Media type selector for TMDB fetch
+                    media_type = st.radio(
+                        "Type",
+                        ["movie", "tv"],
+                        horizontal=True,
+                        key=f"media_type_{k_id}"
+                    )
+                    
+                    if st.button("Fetch by ID", key=f"fetch_tmdb_{k_id}", use_container_width=True):
+                        if new_tmdb_id and new_tmdb_id.isdigit():
+                            library_service.fetch_metadata_by_id(session, int(new_tmdb_id), media_type)
+                            st.rerun()
+                        else:
+                            st.error("Please enter a valid TMDB ID")
 
             with c_del:
                 if st.session_state.get('confirm_del') == session_id:
