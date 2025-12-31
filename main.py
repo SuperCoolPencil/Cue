@@ -25,7 +25,6 @@ from core.drivers.ipc_driver import PlayerDriver
 from core.settings import load_settings, save_settings, SESSIONS_PATH, DATABASE_PATH
 from core.utils import format_seconds_to_human_readable
 from core.stats import StatsService
-from core.migration import run_migration_if_needed
 
 # === CONSTANTS & CONFIGURATION ===
 PAGE_TITLE = "Cue"

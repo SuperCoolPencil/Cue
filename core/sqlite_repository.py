@@ -91,12 +91,22 @@ class SqliteRepository(IRepository):
     def save_session(self, session: Session) -> None:
         """Save a session to the database."""
         with self.db.connection() as conn:
-            # Upsert session metadata
+            # Upsert session metadata using ON CONFLICT DO UPDATE to avoid deleting
+            # the row and triggering ON DELETE CASCADE on watch_events.
             conn.execute("""
-                INSERT OR REPLACE INTO sessions 
+                INSERT INTO sessions 
                 (id, filepath, clean_title, season_number, is_user_locked_title,
                  genres, rating, description, poster_path)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                filepath=excluded.filepath,
+                clean_title=excluded.clean_title,
+                season_number=excluded.season_number,
+                is_user_locked_title=excluded.is_user_locked_title,
+                genres=excluded.genres,
+                rating=excluded.rating,
+                description=excluded.description,
+                poster_path=excluded.poster_path
             """, (
                 session.id,
                 session.filepath,
@@ -110,11 +120,19 @@ class SqliteRepository(IRepository):
             ))
             
             # Upsert playback state
+            # Playback is 1:1 with session, but we can also use UPSERT here for consistency
             conn.execute("""
-                INSERT OR REPLACE INTO playback
+                INSERT INTO playback
                 (session_id, last_played_file, last_played_index, position, 
                  duration, is_finished, timestamp)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                last_played_file=excluded.last_played_file,
+                last_played_index=excluded.last_played_index,
+                position=excluded.position,
+                duration=excluded.duration,
+                is_finished=excluded.is_finished,
+                timestamp=excluded.timestamp
             """, (
                 session.id,
                 session.playback.last_played_file,
