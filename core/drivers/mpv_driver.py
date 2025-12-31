@@ -99,7 +99,7 @@ class MpvDriver(IPlayerDriver):
                         except (ValueError, TypeError):
                             pass
                     
-                    time.sleep(1)
+                    time.sleep(0.25)
                     
                 except (BrokenPipeError, ConnectionResetError):
                     break

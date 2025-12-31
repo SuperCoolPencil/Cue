@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.sqlite_repository import SqliteRepository
-    from core.domain import Session
+    from core.domain import Session, WatchEvent
 
 
 @dataclass
@@ -18,6 +18,7 @@ class WatchStats:
     viewing_patterns: Dict[int, float]  # hour (0-23) -> minutes
     library_size: int
     completed_count: int
+    recent_history: List['WatchEvent']
 
 
 class StatsService:
@@ -38,7 +39,8 @@ class StatsService:
             completion_rate=completed / len(sessions) if sessions else 0.0,
             viewing_patterns=self.repo.get_viewing_patterns(),
             library_size=len(sessions),
-            completed_count=completed
+            completed_count=completed,
+            recent_history=self.repo.get_watch_history(limit=50)
         )
     
     def get_streak_level(self, minutes: int) -> int:

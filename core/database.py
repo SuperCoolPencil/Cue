@@ -7,7 +7,8 @@ from typing import Generator
 SCHEMA = """
 -- Sessions table (main media items)
 CREATE TABLE IF NOT EXISTS sessions (
-    filepath TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY,
+    filepath TEXT UNIQUE NOT NULL,
     clean_title TEXT NOT NULL,
     season_number INTEGER,
     is_user_locked_title INTEGER DEFAULT 0,
@@ -19,7 +20,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 -- Playback state (current position per session)
 CREATE TABLE IF NOT EXISTS playback (
-    filepath TEXT PRIMARY KEY REFERENCES sessions(filepath) ON DELETE CASCADE,
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
     last_played_file TEXT,
     last_played_index INTEGER DEFAULT 0,
     position REAL DEFAULT 0,
@@ -31,7 +32,7 @@ CREATE TABLE IF NOT EXISTS playback (
 -- Watch history (for statistics)
 CREATE TABLE IF NOT EXISTS watch_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    filepath TEXT REFERENCES sessions(filepath) ON DELETE CASCADE,
+    session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
     started_at TEXT NOT NULL,
     ended_at TEXT NOT NULL,
     position_start REAL,
@@ -41,7 +42,8 @@ CREATE TABLE IF NOT EXISTS watch_events (
 
 -- Indexes for efficient stat queries
 CREATE INDEX IF NOT EXISTS idx_watch_events_date ON watch_events(started_at);
-CREATE INDEX IF NOT EXISTS idx_watch_events_filepath ON watch_events(filepath);
+CREATE INDEX IF NOT EXISTS idx_watch_events_session_id ON watch_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_filepath ON sessions(filepath);
 """
 
 

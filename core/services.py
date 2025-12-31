@@ -1,4 +1,5 @@
 import os
+import uuid
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
@@ -23,17 +24,31 @@ class LibraryService:
     def __init__(self, repository: IRepository, player_driver: IPlayerDriver):
         self.repository = repository
         self.player_driver = player_driver
-        self.sessions: Dict[str, Session] = self.repository.load_all_sessions()
+        self.sessions: Dict[str, Session] = self.repository.load_all_sessions() # Keyed by ID
+        # Create a reverse index for fast lookup by filepath
+        self._filepath_index: Dict[str, str] = {s.filepath: s.id for s in self.sessions.values()}
 
     def get_or_create_session(self, filepath: str) -> Session:
         """
         Retrieves an existing session or creates a new one for the given filepath.
         Performs initial title guessing if a new session is created and title is not locked.
         """
-        if filepath in self.sessions:
-            return self.sessions[filepath]
+        if filepath in self._filepath_index:
+            session_id = self._filepath_index[filepath]
+            if session_id in self.sessions:
+                return self.sessions[session_id]
         
-        # Create new session
+        # Check if repository has it (if cache missed for some reason or direct access needed)
+        # Note: Repo methods now work with IDs primarily, but we added get_session_by_filepath
+        if hasattr(self.repository, 'get_session_by_filepath'):
+             existing = self.repository.get_session_by_filepath(filepath)
+             if existing:
+                 self.sessions[existing.id] = existing
+                 self._filepath_index[existing.filepath] = existing.id
+                 return existing
+
+        # Create new session with UUID
+        session_id = str(uuid.uuid4())
         initial_title = os.path.basename(filepath)
         season_number = None
 
@@ -55,9 +70,10 @@ class LibraryService:
             season_number=season_number,
             is_user_locked_title=False # Initially not locked
         )
-        new_session = Session(filepath=filepath, metadata=metadata)
+        new_session = Session(id=session_id, filepath=filepath, metadata=metadata)
         self.repository.save_session(new_session) # Persist new session
-        self.sessions[filepath] = new_session
+        self.sessions[session_id] = new_session
+        self._filepath_index[filepath] = session_id
         return new_session
 
     def update_session_metadata(self, filepath: str, clean_title: Optional[str] = None, 
@@ -140,15 +156,21 @@ class LibraryService:
         # Record watch event for statistics
         watch_end_time = datetime.now()
         watch_duration = final_playback_state_from_driver.position - start_time
+        
+        print(f"DEBUG: Watch Session - Start: {start_time}, End: {final_playback_state_from_driver.position}, Duration: {watch_duration}")
+
         if watch_duration > 0:  # Only record if actually watched something
             self.record_watch_event(
-                filepath=filepath,
+                session_id=session.id,
                 started_at=watch_end_time - timedelta(seconds=watch_duration),
                 ended_at=watch_end_time,
                 position_start=start_time,
                 position_end=final_playback_state_from_driver.position,
                 episode_index=index_to_play
             )
+        elif watch_duration <= 0 and (watch_end_time - datetime.now()).total_seconds() > 5:
+             # Fallback for seek-back or odd behavior where user spent time but pos didn't advance linearly
+             print(f"DEBUG: Negative or zero duration detected: {watch_duration}. Skipping history record.")
         
         # Update the session's playback state
         session.playback.position = final_playback_state_from_driver.position
@@ -200,7 +222,7 @@ class LibraryService:
         else:
             return "resume"
 
-    def record_watch_event(self, filepath: str, started_at: datetime, 
+    def record_watch_event(self, session_id: str, started_at: datetime, 
                            ended_at: datetime, position_start: float, 
                            position_end: float, episode_index: int = 0) -> None:
         """
@@ -208,7 +230,7 @@ class LibraryService:
         Should be called when playback ends (either by user or end of media).
         """
         event = WatchEvent(
-            filepath=filepath,
+            session_id=session_id,
             started_at=started_at,
             ended_at=ended_at,
             position_start=position_start,

@@ -122,14 +122,20 @@ def get_library_service(settings: Dict) -> LibraryService:
     
     return LibraryService(repository, player_driver)
 
-def save_title_and_exit_edit_mode(path: str, k_id: int, library_service: LibraryService):
+def save_title_and_exit_edit_mode(session_id: str, k_id: int, library_service: LibraryService):
     """Persists metadata changes to the repository and session state."""
     new_title = st.session_state.get(f"new_title_{k_id}")
     new_season = st.session_state.get(f"new_season_{k_id}")
+    
+    session = st.session_state.sessions[session_id]
+    path = session.filepath
 
-    library_service.update_session_metadata(path, clean_title=new_title, season_number=new_season)
-    st.session_state.sessions[path].metadata.clean_title = new_title
-    st.session_state.sessions[path].metadata.season_number = new_season
+    # Update backend
+    library_service.update_session_metadata(path, clean_title=new_title, season_number=new_season, is_user_locked_title=True)
+    
+    # Update local state
+    session.metadata.clean_title = new_title
+    session.metadata.season_number = new_season
 
 # === COMPONENT RENDERERS ===
 def render_sidebar(settings: Dict):
@@ -193,14 +199,15 @@ def render_sidebar(settings: Dict):
         if st.button("Quit", type="secondary", use_container_width=True): 
             os._exit(0)
 
-def render_card(path: str, session, library_service: LibraryService):
+def render_card(session_id: str, session, library_service: LibraryService):
     """Renders a single media card with playback info and controls."""
+    path = session.filepath
     display_name = session.metadata.clean_title
     pos, dur = session.playback.position, session.playback.duration
     
     is_folder = os.path.isdir(path)
     is_done = (pos / dur > 0.95) if dur else False
-    k_id = hash(path)
+    k_id = hash(session_id)
     
     # Badge Generation
     badges = []
@@ -283,20 +290,20 @@ def render_card(path: str, session, library_service: LibraryService):
                         label_visibility="collapsed"
                     )
                     if st.button("Save", key=f"save_title_{k_id}", use_container_width=True):
-                        save_title_and_exit_edit_mode(path, k_id, library_service)
+                        save_title_and_exit_edit_mode(session_id, k_id, library_service)
                         st.rerun()
 
             # C. Delete
             with c_del:
-                if st.session_state.get('confirm_del') == path:
+                if st.session_state.get('confirm_del') == session_id:
                     if st.button("✓", key=f"y_{k_id}", use_container_width=True, help="Confirm Delete"):
-                        library_service.repository.delete_session(path)
-                        del st.session_state.sessions[path]
+                        library_service.repository.delete_session(session_id)
+                        del st.session_state.sessions[session_id]
                         del st.session_state['confirm_del']
                         st.rerun()
                 else:
                     if st.button("✕", key=f"del_{k_id}", use_container_width=True, help="Remove from Library"):
-                        st.session_state['confirm_del'] = path
+                        st.session_state['confirm_del'] = session_id
                         st.rerun()
 
     st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
@@ -428,6 +435,48 @@ def render_stats_page(library_service: LibraryService):
         else:
             st.markdown('<div class="empty-state">No viewing pattern data yet</div>', unsafe_allow_html=True)
 
+    st.markdown("<div style='height: 2rem'></div>", unsafe_allow_html=True)
+
+    # === Recent History ===
+    st.markdown('<div class="section-header">Recent History</div>', unsafe_allow_html=True)
+    
+    if stats.recent_history:
+        history_html = '<div class="history-list">'
+        sessions = library_service.get_all_sessions()
+        
+        # Group by date
+        current_date_tracker = None
+        
+        for event in stats.recent_history:
+            # Date header
+            event_date = event.started_at.date()
+            if current_date_tracker != event_date:
+                date_str = "Today" if event_date == datetime.now().date() else event_date.strftime("%B %d, %Y")
+                history_html += f'<div class="history-date-header">{date_str}</div>'
+                current_date_tracker = event_date
+            
+            # Resolve title
+            title = "Unknown Title"
+            if event.session_id in sessions:
+                title = sessions[event.session_id].metadata.clean_title
+                
+            duration = event.ended_at - event.started_at
+            duration_str = stats_service.format_watch_time(duration.total_seconds())
+            time_str = event.started_at.strftime("%I:%M %p")
+            
+            history_html += f'''<div class="history-item">
+<div class="history-time">{time_str}</div>
+<div class="history-details">
+<div class="history-title">{title}</div>
+<div class="history-meta">Duration: {duration_str}</div>
+</div>
+</div>'''
+        
+        history_html += '</div>'
+        st.markdown(history_html, unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="empty-state">No recent watch history</div>', unsafe_allow_html=True)
+
 # === MAIN ENTRY POINT ===
 def main():
     settings = load_settings()
@@ -475,8 +524,8 @@ def main():
         if not items: 
             st.info("📚 Your library is empty. Click 'Open Folder' or 'Open File' to get started.")
         else: 
-            for path, session in items: 
-                render_card(path, session, library_service)
+            for session_id, session in items: 
+                render_card(session_id, session, library_service)
 
 if __name__ == "__main__":
     main()

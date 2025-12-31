@@ -7,7 +7,7 @@ from typing import Optional, List
 class WatchEvent:
     """Records a single viewing session for statistics tracking."""
     id: Optional[int] = None
-    filepath: str = ""
+    session_id: str = ""
     started_at: datetime = field(default_factory=datetime.now)
     ended_at: datetime = field(default_factory=datetime.now)
     position_start: float = 0.0
@@ -41,6 +41,7 @@ class MediaMetadata:
 @dataclass
 class Session:
     """Aggregates playback state and media metadata for a specific media item."""
+    id: str
     filepath: str
     metadata: MediaMetadata
     playback: PlaybackState = field(default_factory=PlaybackState)

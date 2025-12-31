@@ -16,6 +16,7 @@ class SqliteRepository(IRepository):
         self.db = Database(db_path)
         self._sessions_cache: Optional[Dict[str, Session]] = None
     
+
     def _row_to_session(self, row) -> Session:
         """Convert a database row to a Session object."""
         genres = json.loads(row['genres']) if row['genres'] else []
@@ -39,40 +40,65 @@ class SqliteRepository(IRepository):
             timestamp=datetime.fromisoformat(row['timestamp']) if row['timestamp'] else datetime.now()
         )
         
-        return Session(filepath=row['filepath'], metadata=metadata, playback=playback)
+        return Session(id=row['id'], filepath=row['filepath'], metadata=metadata, playback=playback)
     
     def load_all_sessions(self) -> Dict[str, Session]:
-        """Load all sessions from the database."""
+        """Load all sessions from the database, keyed by ID."""
         if self._sessions_cache is not None:
             return self._sessions_cache
             
         sessions = {}
         with self.db.connection() as conn:
             rows = conn.execute("""
-                SELECT s.filepath, s.clean_title, s.season_number, s.is_user_locked_title,
+                SELECT s.id, s.filepath, s.clean_title, s.season_number, s.is_user_locked_title,
                        s.genres, s.rating, s.description, s.poster_path,
                        p.last_played_file, p.last_played_index, p.position, 
                        p.duration, p.is_finished, p.timestamp
                 FROM sessions s
-                LEFT JOIN playback p ON s.filepath = p.filepath
+                LEFT JOIN playback p ON s.id = p.session_id
             """).fetchall()
             
             for row in rows:
-                sessions[row['filepath']] = self._row_to_session(row)
+                session = self._row_to_session(row)
+                sessions[session.id] = session
         
         self._sessions_cache = sessions
         return sessions
     
+    def get_session_by_filepath(self, filepath: str) -> Optional[Session]:
+        """Retrieve a session by its filepath."""
+        # Check cache first (optimization)
+        if self._sessions_cache:
+            for session in self._sessions_cache.values():
+                if session.filepath == filepath:
+                    return session
+        
+        with self.db.connection() as conn:
+            row = conn.execute("""
+                SELECT s.id, s.filepath, s.clean_title, s.season_number, s.is_user_locked_title,
+                       s.genres, s.rating, s.description, s.poster_path,
+                       p.last_played_file, p.last_played_index, p.position, 
+                       p.duration, p.is_finished, p.timestamp
+                FROM sessions s
+                LEFT JOIN playback p ON s.id = p.session_id
+                WHERE s.filepath = ?
+            """, (filepath,)).fetchone()
+            
+            if row:
+                return self._row_to_session(row)
+        return None
+
     def save_session(self, session: Session) -> None:
         """Save a session to the database."""
         with self.db.connection() as conn:
             # Upsert session metadata
             conn.execute("""
                 INSERT OR REPLACE INTO sessions 
-                (filepath, clean_title, season_number, is_user_locked_title,
+                (id, filepath, clean_title, season_number, is_user_locked_title,
                  genres, rating, description, poster_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
+                session.id,
                 session.filepath,
                 session.metadata.clean_title,
                 session.metadata.season_number,
@@ -86,11 +112,11 @@ class SqliteRepository(IRepository):
             # Upsert playback state
             conn.execute("""
                 INSERT OR REPLACE INTO playback
-                (filepath, last_played_file, last_played_index, position, 
+                (session_id, last_played_file, last_played_index, position, 
                  duration, is_finished, timestamp)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
-                session.filepath,
+                session.id,
                 session.playback.last_played_file,
                 session.playback.last_played_index,
                 session.playback.position,
@@ -101,17 +127,17 @@ class SqliteRepository(IRepository):
         
         # Update cache
         if self._sessions_cache is not None:
-            self._sessions_cache[session.filepath] = session
+            self._sessions_cache[session.id] = session
     
-    def delete_session(self, filepath: str) -> None:
+    def delete_session(self, session_id: str) -> None:
         """Delete a session from the database."""
         with self.db.connection() as conn:
-            conn.execute("DELETE FROM playback WHERE filepath = ?", (filepath,))
-            conn.execute("DELETE FROM sessions WHERE filepath = ?", (filepath,))
+            conn.execute("DELETE FROM playback WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         
         # Update cache
-        if self._sessions_cache is not None and filepath in self._sessions_cache:
-            del self._sessions_cache[filepath]
+        if self._sessions_cache is not None and session_id in self._sessions_cache:
+            del self._sessions_cache[session_id]
     
     # === Watch Event Methods ===
     
@@ -120,10 +146,10 @@ class SqliteRepository(IRepository):
         with self.db.connection() as conn:
             conn.execute("""
                 INSERT INTO watch_events 
-                (filepath, started_at, ended_at, position_start, position_end, episode_index)
+                (session_id, started_at, ended_at, position_start, position_end, episode_index)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (
-                event.filepath,
+                event.session_id,
                 event.started_at.isoformat(),
                 event.ended_at.isoformat(),
                 event.position_start,
@@ -149,8 +175,8 @@ class SqliteRepository(IRepository):
                 SELECT s.clean_title, 
                        COALESCE(SUM(w.position_end - w.position_start), 0) as watch_time
                 FROM sessions s
-                LEFT JOIN watch_events w ON w.filepath = s.filepath
-                GROUP BY s.filepath
+                LEFT JOIN watch_events w ON w.session_id = s.id
+                GROUP BY s.id
                 ORDER BY watch_time DESC
                 LIMIT ?
             """, (limit,)).fetchall()
@@ -184,7 +210,7 @@ class SqliteRepository(IRepository):
         """Get recent watch history timeline."""
         with self.db.connection() as conn:
             rows = conn.execute("""
-                SELECT id, filepath, started_at, ended_at, 
+                SELECT id, session_id, started_at, ended_at, 
                        position_start, position_end, episode_index
                 FROM watch_events
                 ORDER BY started_at DESC
@@ -195,7 +221,7 @@ class SqliteRepository(IRepository):
             for row in rows:
                 events.append(WatchEvent(
                     id=row['id'],
-                    filepath=row['filepath'],
+                    session_id=row['session_id'],
                     started_at=datetime.fromisoformat(row['started_at']),
                     ended_at=datetime.fromisoformat(row['ended_at']),
                     position_start=row['position_start'],
