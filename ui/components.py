@@ -3,7 +3,7 @@ from datetime import datetime
 import streamlit as st
 from core.config import EPISODE_COMPLETION_THRESHOLD
 from core.utils import format_seconds_to_human_readable
-from ui.utils import open_file_dialog, open_in_file_manager
+from ui.utils import open_file_dialog, open_in_file_manager, open_file_in_default_app
 from core.settings import save_settings
 
 # Constants for UI
@@ -68,6 +68,12 @@ def render_sidebar(settings, current_page):
                 # We need to trigger a context reload in the main app
                 st.session_state['context_reload_needed'] = True
                 st.rerun()
+        
+        # Open config in default editor
+        if st.button("Open Config", use_container_width=True):
+            import pathlib
+            config_path = pathlib.Path(__file__).parent.parent / "core" / "config.py"
+            open_file_in_default_app(str(config_path))
                 
         if st.button("Quit", type="secondary", use_container_width=True): 
             os._exit(0)
