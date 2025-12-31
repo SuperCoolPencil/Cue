@@ -27,15 +27,9 @@ RECAP_SUGGESTION_DAYS = 7
 # Number of days for streak calendar display
 STREAK_CALENDAR_DAYS = 365
 
-# Streak level thresholds (minutes watched -> level 0-4)
-# Used for heatmap intensity in the stats page
-STREAK_LEVEL_THRESHOLDS = {
-    0: 0,      # No watch
-    1: 1,      # 1-29 minutes
-    2: 30,     # 30-59 minutes
-    3: 60,     # 60-119 minutes (1-2 hours)
-    4: 120,    # 120+ minutes (2+ hours)
-}
+# Default streak level thresholds (minutes) - used when no watch data exists
+# Actual thresholds are calculated dynamically based on user's watch history
+DEFAULT_STREAK_THRESHOLDS = [0, 15, 30, 60, 120]  # levels 0-4
 
 # Number of items to show in "Most Watched" list
 MOST_WATCHED_LIMIT = 10
