@@ -6,56 +6,25 @@ from typing import List, Optional
 
 def get_media_duration(filepath: str) -> float:
     """
-    Gets the duration of a media file in seconds using mpv.
+    Gets the duration of a media file in seconds using ffprobe.
     Returns 0.0 if duration cannot be determined.
     """
     try:
         result = subprocess.run(
             [
-                "mpv", 
-                "--no-terminal", 
-                "--no-video", 
-                "--no-audio", 
-                "--output-json", 
-                "--identify", 
+                "ffprobe", 
+                "-v", "error", 
+                "-show_entries", "format=duration", 
+                "-of", "default=noprint_wrappers=1:nokey=1", 
                 filepath
             ],
             capture_output=True,
             text=True
         )
-        # Parse the JSON output from --identify
-        # Note: mpv output can be messy. We look for lines starting with "{"
-        for line in result.stdout.splitlines():
-            try:
-                data = json.loads(line)
-                if "duration" in data:
-                    return float(data["duration"])
-            except json.JSONDecodeError:
-                continue
-                
-        # Fallback: sometimes duration is in the summary or stderr, 
-        # but --output-json --identify usually works.
-        # Let's try a simpler property probe if the above fails or is complex parsing
-        # Actually, `mpv --no-terminal --quiet --print-text --command=print-property=duration FILE` is cleaner
-        
-        result_prop = subprocess.run(
-            [
-                "mpv",
-                "--no-terminal",
-                "--quiet",
-                "--no-video",
-                "--no-audio",
-                "--command=print-text ${duration}", 
-                filepath
-            ],
-             capture_output=True,
-             text=True
-        )
-        if result_prop.returncode == 0:
-             val = result_prop.stdout.strip()
-             if val:
-                 return float(val)
-
+        if result.returncode == 0:
+            val = result.stdout.strip()
+            if val:
+                return float(val)
     except Exception as e:
         print(f"Error getting duration for {filepath}: {e}")
     
