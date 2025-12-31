@@ -4,6 +4,12 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
 
+from core.config import (
+    WATCH_EVENT_MERGE_WINDOW_MINUTES,
+    STREAK_CALENDAR_DAYS,
+    MOST_WATCHED_LIMIT,
+    WATCH_HISTORY_LIMIT,
+)
 from core.interfaces import IRepository
 from core.domain import Session, MediaMetadata, PlaybackState, WatchEvent
 from core.database import Database
@@ -162,34 +168,33 @@ class SqliteRepository(IRepository):
     def record_watch_event(self, event: WatchEvent) -> None:
         """
         Record a watch event for statistics tracking.
-        Merges with the previous event if it's for the same session/episode
-        and occurred within 5 minutes.
+        Merges with the previous event if it's for the same session
+        and occurred within the configured merge window.
         """
         with self.db.connection() as conn:
-            # Check for recent event to compress
-            five_mins_ago = (event.started_at - timedelta(minutes=5)).isoformat()
+            # Check for recent event to merge (same session, within merge window)
+            merge_cutoff = (event.started_at - timedelta(minutes=WATCH_EVENT_MERGE_WINDOW_MINUTES)).isoformat()
             
             cursor = conn.execute("""
-                SELECT id, ended_at, position_end 
+                SELECT id, started_at, ended_at, position_start, position_end 
                 FROM watch_events 
                 WHERE session_id = ? 
-                  AND episode_index = ?
                   AND ended_at >= ?
                 ORDER BY ended_at DESC
                 LIMIT 1
-            """, (event.session_id, event.episode_index, five_mins_ago))
+            """, (event.session_id, merge_cutoff))
             
             last_event = cursor.fetchone()
             
             if last_event:
-                # Compression: Update the existing event
-                # New end time is the new event's end time
-                # New position end is the new event's position end
+                # Merge: Extend the existing event's end time and position
+                # Keep the original start time, update end time and position_end
                 conn.execute("""
                     UPDATE watch_events
-                    SET ended_at = ?, position_end = ?
+                    SET ended_at = ?, position_end = ?, episode_index = ?
                     WHERE id = ?
-                """, (event.ended_at.isoformat(), event.position_end, last_event['id']))
+                """, (event.ended_at.isoformat(), event.position_end, event.episode_index, last_event['id']))
+                print(f"DEBUG: Merged watch event - extended existing entry")
             else:
                 # Insert new event
                 conn.execute("""
@@ -204,24 +209,29 @@ class SqliteRepository(IRepository):
                     event.position_end,
                     event.episode_index
                 ))
+                print(f"DEBUG: Created new watch event entry")
     
     # === Statistics Queries ===
     
     def get_total_watch_time(self) -> float:
-        """Get total watch time in seconds across all sessions."""
+        """Get total watch time in seconds across all sessions (wall clock time)."""
         with self.db.connection() as conn:
             result = conn.execute("""
-                SELECT COALESCE(SUM(position_end - position_start), 0) as total 
+                SELECT COALESCE(SUM(
+                    (julianday(ended_at) - julianday(started_at)) * 86400
+                ), 0) as total 
                 FROM watch_events
             """).fetchone()
             return result['total']
     
-    def get_most_watched(self, limit: int = 10) -> List[Tuple[str, float]]:
-        """Get most watched shows/movies by total watch time."""
+    def get_most_watched(self, limit: int = MOST_WATCHED_LIMIT) -> List[Tuple[str, float]]:
+        """Get most watched shows/movies by total watch time (wall clock)."""
         with self.db.connection() as conn:
             rows = conn.execute("""
                 SELECT s.clean_title, 
-                       COALESCE(SUM(w.position_end - w.position_start), 0) as watch_time
+                       COALESCE(SUM(
+                           (julianday(w.ended_at) - julianday(w.started_at)) * 86400
+                       ), 0) as watch_time
                 FROM sessions s
                 LEFT JOIN watch_events w ON w.session_id = s.id
                 GROUP BY s.id
@@ -230,12 +240,14 @@ class SqliteRepository(IRepository):
             """, (limit,)).fetchall()
             return [(row['clean_title'], row['watch_time']) for row in rows]
     
-    def get_streak_calendar(self, days: int = 365) -> Dict[str, int]:
-        """Get watch streak calendar data (date -> minutes watched)."""
+    def get_streak_calendar(self, days: int = STREAK_CALENDAR_DAYS) -> Dict[str, int]:
+        """Get watch streak calendar data (date -> minutes watched, wall clock)."""
         with self.db.connection() as conn:
             rows = conn.execute("""
                 SELECT DATE(started_at) as date, 
-                       CAST(SUM(position_end - position_start) / 60 AS INTEGER) as minutes
+                       CAST(SUM(
+                           (julianday(ended_at) - julianday(started_at)) * 1440
+                       ) AS INTEGER) as minutes
                 FROM watch_events
                 WHERE DATE(started_at) >= DATE('now', ?)
                 GROUP BY DATE(started_at)
@@ -243,18 +255,20 @@ class SqliteRepository(IRepository):
             return {row['date']: row['minutes'] for row in rows}
     
     def get_viewing_patterns(self) -> Dict[int, float]:
-        """Get viewing patterns by hour of day (hour -> minutes watched)."""
+        """Get viewing patterns by hour of day (hour -> minutes watched, wall clock)."""
         with self.db.connection() as conn:
             rows = conn.execute("""
                 SELECT CAST(strftime('%H', started_at) AS INTEGER) as hour,
-                       COALESCE(SUM(position_end - position_start) / 60, 0) as minutes
+                       COALESCE(SUM(
+                           (julianday(ended_at) - julianday(started_at)) * 1440
+                       ), 0) as minutes
                 FROM watch_events
                 GROUP BY hour
                 ORDER BY hour
             """).fetchall()
             return {row['hour']: row['minutes'] for row in rows}
     
-    def get_watch_history(self, limit: int = 50) -> List[WatchEvent]:
+    def get_watch_history(self, limit: int = WATCH_HISTORY_LIMIT) -> List[WatchEvent]:
         """Get recent watch history timeline."""
         with self.db.connection() as conn:
             rows = conn.execute("""

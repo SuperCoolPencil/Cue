@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 import streamlit as st
+from core.config import EPISODE_COMPLETION_THRESHOLD
 from core.utils import format_seconds_to_human_readable
 from ui.utils import open_file_dialog, open_in_file_manager
 from core.settings import save_settings
@@ -78,7 +79,7 @@ def render_card(session_id: str, session, library_service):
     pos, dur = session.playback.position, session.playback.duration
     
     is_folder = os.path.isdir(path)
-    is_done = (pos / dur > 0.95) if dur else False
+    is_done = (pos / dur > EPISODE_COMPLETION_THRESHOLD) if dur else False
     k_id = hash(session_id)
     
     badges = []

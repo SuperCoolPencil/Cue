@@ -4,6 +4,12 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 
+from core.config import (
+    MIN_WATCH_DURATION_SECONDS,
+    EPISODE_COMPLETION_THRESHOLD,
+    RECAP_SUGGESTION_DAYS,
+)
+
 # Try to import guessit, but make it optional
 try:
     from guessit import guessit
@@ -162,7 +168,7 @@ class LibraryService:
         
         # --- Record Single Watch Event with Wall Clock Time ---
         # We only care about total time spent, not per-episode breakdown
-        if total_wall_clock_seconds > 1.0:  # Filter noise
+        if total_wall_clock_seconds > MIN_WATCH_DURATION_SECONDS:
             self.record_watch_event(
                 session_id=session.id,
                 started_at=watch_start_time,
@@ -216,9 +222,9 @@ class LibraryService:
         if session.playback.duration > 0:
             completion = session.playback.position / session.playback.duration
         
-        if completion > 0.95:
+        if completion > EPISODE_COMPLETION_THRESHOLD:
             return "restart_or_next"
-        elif days_since_last > 7:
+        elif days_since_last > RECAP_SUGGESTION_DAYS:
             return "show_recap"
         else:
             return "resume"

@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, TYPE_CHECKING
 
+from core.config import STREAK_LEVEL_THRESHOLDS
+
 if TYPE_CHECKING:
     from core.sqlite_repository import SqliteRepository
     from core.domain import Session, WatchEvent
@@ -46,19 +48,15 @@ class StatsService:
     def get_streak_level(self, minutes: int) -> int:
         """
         Convert minutes watched to a streak level (0-4) for heatmap display.
-        0: No activity
-        1: < 30 min
-        2: 30-60 min
-        3: 1-2 hours
-        4: > 2 hours
+        Uses thresholds from config.
         """
         if minutes == 0:
             return 0
-        elif minutes < 30:
+        elif minutes < STREAK_LEVEL_THRESHOLDS[2]:  # < 30 min
             return 1
-        elif minutes < 60:
+        elif minutes < STREAK_LEVEL_THRESHOLDS[3]:  # < 60 min
             return 2
-        elif minutes < 120:
+        elif minutes < STREAK_LEVEL_THRESHOLDS[4]:  # < 120 min
             return 3
         else:
             return 4
