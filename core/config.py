@@ -41,6 +41,11 @@ WATCH_HISTORY_LIMIT = 50
 
 # TMDB API settings - can be overridden via TMDB_API_KEY environment variable
 import os
+from dotenv import load_dotenv
+
+# Load .env file if it exists
+load_dotenv()
+
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "1f79ab14926c11fa2a58f30d05e4dada")
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/"
 TMDB_POSTER_SIZE = "w500"
