@@ -153,24 +153,75 @@ class LibraryService:
             start_time=start_time
         )
         
-        # Record watch event for statistics
         watch_end_time = datetime.now()
-        watch_duration = final_playback_state_from_driver.position - start_time
         
-        print(f"DEBUG: Watch Session - Start: {start_time}, End: {final_playback_state_from_driver.position}, Duration: {watch_duration}")
+        # --- Handle Multi-File Watch Events ---
+        final_index = final_playback_state_from_driver.last_played_index
+        
+        # NOTE: MPV driver might not return perfect index if paths are tricky, 
+        # but let's trust the logic we have or the one returned.
+        # If the driver didn't return a valid index, we try to match it below, 
+        # but for calculation we need it now.
+        if final_playback_state_from_driver.last_played_file:
+             for i, file_in_series in enumerate(series_files):
+                 if (final_playback_state_from_driver.last_played_file in file_in_series) or \
+                    (file_in_series in final_playback_state_from_driver.last_played_file):
+                     final_index = i
+                     break
+        
+        # 1. Iterate from start_index to final_index
+        # If they are different, we watched multiple files.
+        # If they are same, just one file.
+        
+        # We need a robust way to iterate.
+        if final_index >= index_to_play:
+             indices_watched = range(index_to_play, final_index + 1)
+        else:
+             # Fallback if somehow index went backwards (user manually picked previous in playlist?)
+             indices_watched = [final_index]
+        
+        for i in indices_watched:
+             # Determine Start Position
+             current_start_pos = start_time if i == index_to_play else 0.0
+             
+             # Determine End Position & Duration
+             if i == final_index:
+                 # This is the last file watched
+                 current_end_pos = final_playback_state_from_driver.position
+             else:
+                 # This is an intermediate file (fully watched)
+                 # We need its duration.
+                 # TODO: Cache this if expensive?
+                 from core.utils import get_media_duration
+                 full_duration = get_media_duration(series_files[i])
+                 current_end_pos = full_duration if full_duration > 0 else 0.0 # Fallback
+            
+             watch_duration = current_end_pos - current_start_pos
+             
+             print(f"DEBUG: Watch Session (Index {i}) - Start: {current_start_pos}, End: {current_end_pos}, Duration: {watch_duration}")
 
-        if watch_duration > 0:  # Only record if actually watched something
-            self.record_watch_event(
-                session_id=session.id,
-                started_at=watch_end_time - timedelta(seconds=watch_duration),
-                ended_at=watch_end_time,
-                position_start=start_time,
-                position_end=final_playback_state_from_driver.position,
-                episode_index=index_to_play
-            )
-        elif watch_duration <= 0 and (watch_end_time - datetime.now()).total_seconds() > 5:
-             # Fallback for seek-back or odd behavior where user spent time but pos didn't advance linearly
-             print(f"DEBUG: Negative or zero duration detected: {watch_duration}. Skipping history record.")
+             if watch_duration > 1.0: # Filter noise
+                 # Calculate approximate time this specific file observation ended
+                 # This is tricky without exact timestamps for each file transition.
+                 # We approximate: 
+                 # If it's the LAST file, it ended NOW.
+                 # If it's an intermediate file, it ended sometime before NOw.
+                 # This is imperfect for "started_at" of previous files, but "ended_at" is key for compression.
+                 # Let's just use watch_end_time for all, 
+                 # relying on the FACT that compression simply looks for "recent overlap".
+                 # OR, we could back-calculate, but we don't know exact play speed.
+                 # Using 'watch_end_time' for all is safest for "when did this session finish".
+                 
+                 self.record_watch_event(
+                    session_id=session.id,
+                    started_at=watch_end_time - timedelta(seconds=watch_duration),
+                    ended_at=watch_end_time,
+                    position_start=current_start_pos,
+                    position_end=current_end_pos,
+                    episode_index=i
+                 )
+             elif watch_duration <= 0:
+                 print(f"DEBUG: Skipping invalid duration for index {i}: {watch_duration}")
         
         # Update the session's playback state
         session.playback.position = final_playback_state_from_driver.position

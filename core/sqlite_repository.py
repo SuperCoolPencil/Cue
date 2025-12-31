@@ -1,7 +1,7 @@
 """SQLite repository implementation for Cue."""
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
 
 from core.interfaces import IRepository
@@ -160,20 +160,50 @@ class SqliteRepository(IRepository):
     # === Watch Event Methods ===
     
     def record_watch_event(self, event: WatchEvent) -> None:
-        """Record a watch event for statistics tracking."""
+        """
+        Record a watch event for statistics tracking.
+        Merges with the previous event if it's for the same session/episode
+        and occurred within 5 minutes.
+        """
         with self.db.connection() as conn:
-            conn.execute("""
-                INSERT INTO watch_events 
-                (session_id, started_at, ended_at, position_start, position_end, episode_index)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                event.session_id,
-                event.started_at.isoformat(),
-                event.ended_at.isoformat(),
-                event.position_start,
-                event.position_end,
-                event.episode_index
-            ))
+            # Check for recent event to compress
+            five_mins_ago = (event.started_at - timedelta(minutes=5)).isoformat()
+            
+            cursor = conn.execute("""
+                SELECT id, ended_at, position_end 
+                FROM watch_events 
+                WHERE session_id = ? 
+                  AND episode_index = ?
+                  AND ended_at >= ?
+                ORDER BY ended_at DESC
+                LIMIT 1
+            """, (event.session_id, event.episode_index, five_mins_ago))
+            
+            last_event = cursor.fetchone()
+            
+            if last_event:
+                # Compression: Update the existing event
+                # New end time is the new event's end time
+                # New position end is the new event's position end
+                conn.execute("""
+                    UPDATE watch_events
+                    SET ended_at = ?, position_end = ?
+                    WHERE id = ?
+                """, (event.ended_at.isoformat(), event.position_end, last_event['id']))
+            else:
+                # Insert new event
+                conn.execute("""
+                    INSERT INTO watch_events 
+                    (session_id, started_at, ended_at, position_start, position_end, episode_index)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    event.session_id,
+                    event.started_at.isoformat(),
+                    event.ended_at.isoformat(),
+                    event.position_start,
+                    event.position_end,
+                    event.episode_index
+                ))
     
     # === Statistics Queries ===
     
