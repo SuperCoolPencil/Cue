@@ -2,11 +2,11 @@
 
 **Cue** is a premium, cross-platform media dashboard that remembers exactly where you left off. It acts as a smart central hub for your local media, tracking playback progress with automated metadata enrichment and a beautiful statistics dashboard.
 
-````carousel
+### Library View
 ![Library View](assets/library.png)
-<!-- slide -->
+
+### Stats View
 ![Stats View](assets/stats.png)
-````
 
 ## ✨ Features
 

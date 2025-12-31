@@ -166,6 +166,12 @@ def render_sidebar(settings, current_page):
         if st.button("Quit", type="secondary", use_container_width=True): 
             os._exit(0)
 
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(
+            f'<a href="https://github.com/SuperCoolPencil/Cue" target="_blank" class="github-link">View on GitHub</a>', 
+            unsafe_allow_html=True
+        )
+
 def render_card(session_id: str, session, library_service):
     """Renders a single media card with playback info and controls."""
     path = session.filepath
