@@ -104,17 +104,18 @@ def edit_metadata_dialog():
 def render_sidebar(settings, current_page):
     """Renders the sidebar navigation and preferences."""
     with st.sidebar:
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Library", use_container_width=True, 
-                        type="primary" if current_page == 'library' else "secondary"):
-                st.session_state.current_page = 'library'
-                st.rerun()
-        with col2:
-            if st.button("Stats", use_container_width=True,
-                        type="primary" if current_page == 'stats' else "secondary"):
-                st.session_state.current_page = 'stats'
-                st.rerun()
+        if st.button("Library", use_container_width=True, 
+                    type="primary" if current_page == 'library' else "secondary"):
+            st.session_state.current_page = 'library'
+            st.rerun()
+        if st.button("Archived", use_container_width=True,
+                    type="primary" if current_page == 'archived' else "secondary"):
+            st.session_state.current_page = 'archived'
+            st.rerun()
+        if st.button("Stats", use_container_width=True,
+                    type="primary" if current_page == 'stats' else "secondary"):
+            st.session_state.current_page = 'stats'
+            st.rerun()
         
         st.markdown("---")
         
@@ -273,13 +274,13 @@ def render_card(session_id: str, session, library_service):
                 if is_folder and library_service.has_next_episode(session):
                     next_info = library_service.get_next_episode_info(session)
                     if next_info:
-                        play_label = f"▶ Next: EP {next_info[0] + 1}"
+                        play_label = f"Next: EP {next_info[0] + 1}"
                 else:
-                    play_label = "↺ Restart"
+                    play_label = "Restart"
             elif resume_action == "show_recap":
-                play_label = "▶ Resume (1w+ ago)"
+                play_label = "Continue (1w+ ago)"
             else:
-                play_label = "↺ Replay" if is_done else "▶ Resume"
+                play_label = "Replay" if is_done else "Continue"
             
             if st.button(play_label, key=f"play_{k_id}", use_container_width=True):
                 st.session_state['resume_data'] = path
@@ -314,6 +315,12 @@ def render_card(session_id: str, session, library_service):
                     if st.button("✕", key=f"del_{k_id}", use_container_width=True, help="Remove from Library"):
                         st.session_state['confirm_del'] = session_id
                         st.rerun()
+            
+            # Archive button on its own row
+            if st.button("Archive", key=f"archive_{k_id}", use_container_width=True):
+                session.archived = True
+                library_service.repository.save_session(session)
+                st.rerun()
 
     st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
 
@@ -414,7 +421,9 @@ def render_stats_page(stats_service, library_service):
         if stats.viewing_patterns and any(v > 0 for v in stats.viewing_patterns.values()):
             max_minutes = max(stats.viewing_patterns.values())
             pattern_html = '<div class="patterns-container"><div class="viewing-patterns">'
-            for hour in range(24):
+            # Start at 6am and wrap around (6, 7, ..., 23, 0, 1, ..., 5)
+            for i in range(24):
+                hour = (6 + i) % 24
                 minutes = stats.viewing_patterns.get(hour, 0)
                 height_pct = (minutes / max_minutes * 100) if max_minutes > 0 else 0
                 time_label = f"{hour:02d}:00"
@@ -422,7 +431,7 @@ def render_stats_page(stats_service, library_service):
 <div class="pattern-bar" style="height: {height_pct}%"></div>
 </div>'''
             pattern_html += '</div>'
-            pattern_html += '<div class="pattern-labels"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span></div>'
+            pattern_html += '<div class="pattern-labels"><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span><span>6am</span></div>'
             pattern_html += '</div>'
             st.markdown(pattern_html, unsafe_allow_html=True)
         else:
@@ -458,3 +467,66 @@ def render_stats_page(stats_service, library_service):
         st.markdown(history_html, unsafe_allow_html=True)
     else:
         st.markdown('<div class="empty-state">No recent watch history</div>', unsafe_allow_html=True)
+
+
+def render_archived_page(library_service):
+    """Renders the archived sessions page with minimal info and unarchive option."""
+    st.markdown('<div class="main-header">Archived.</div>', unsafe_allow_html=True)
+    
+    sessions = library_service.get_all_sessions()
+    archived_items = sorted(
+        [(sid, s) for sid, s in sessions.items() if s.archived],
+        key=lambda x: x[1].playback.timestamp,
+        reverse=True
+    )
+    
+    st.markdown(f'<div class="sub-header">{len(archived_items)} archived items</div>', unsafe_allow_html=True)
+    
+    if not archived_items:
+        st.info("📁 No archived items. Use the archive button on a session to move it here.")
+        return
+    
+    for session_id, session in archived_items:
+        k_id = hash(session_id)
+        display_name = session.metadata.clean_title
+        is_folder = os.path.isdir(session.filepath)
+        
+        # Build badges
+        badges = []
+        badges.append(f'<span class="badge b-folder">{"SERIES" if is_folder else "MOVIE"}</span>')
+        
+        if session.metadata.year:
+            badges.append(f'<span class="badge b-year">{session.metadata.year}</span>')
+        
+        current_season = session.metadata.season_number
+        if isinstance(current_season, list):
+            current_season = current_season[0] if current_season else None
+        if current_season:
+            badges.append(f'<span class="badge b-season">SEASON {current_season:02d}</span>')
+        
+        if is_folder:
+            series_files = library_service.get_series_files(session)
+            if series_files:
+                total = len(series_files)
+                badges.append(f'<span class="badge b-accent">{total} EPISODES</span>')
+        
+        with st.container():
+            col_info, col_action = st.columns([0.85, 0.15], gap="small")
+            
+            with col_info:
+                html_info = f"""<div class="cue-card archived-card">
+<div class="card-header">
+<div class="card-title">{display_name}</div>
+</div>
+<div class="badge-container">{"".join(badges)}</div>
+</div>"""
+                st.markdown(html_info, unsafe_allow_html=True)
+            
+            with col_action:
+                st.write("")
+                if st.button("Unarchive", key=f"unarchive_{k_id}", use_container_width=True):
+                    session.archived = False
+                    library_service.repository.save_session(session)
+                    st.rerun()
+        
+        st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)

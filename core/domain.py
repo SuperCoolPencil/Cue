@@ -53,3 +53,4 @@ class Session:
     filepath: str
     metadata: MediaMetadata
     playback: PlaybackState = field(default_factory=PlaybackState)
+    archived: bool = False

@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     vote_average REAL,
     vote_count INTEGER,
     runtime_minutes INTEGER,
-    is_metadata_fetched INTEGER DEFAULT 0
+    is_metadata_fetched INTEGER DEFAULT 0,
+    archived INTEGER DEFAULT 0
 );
 
 -- Playback state (current position per session)
@@ -63,6 +64,7 @@ MIGRATION_COLUMNS = [
     ("vote_count", "INTEGER"),
     ("runtime_minutes", "INTEGER"),
     ("is_metadata_fetched", "INTEGER DEFAULT 0"),
+    ("archived", "INTEGER DEFAULT 0"),
 ]
 
 

@@ -54,7 +54,8 @@ class SqliteRepository(IRepository):
             timestamp=datetime.fromisoformat(row['timestamp']) if row['timestamp'] else datetime.now()
         )
         
-        return Session(id=row['id'], filepath=row['filepath'], metadata=metadata, playback=playback)
+        return Session(id=row['id'], filepath=row['filepath'], metadata=metadata, playback=playback,
+                       archived=bool(row['archived']) if 'archived' in row.keys() else False)
     
     def load_all_sessions(self) -> Dict[str, Session]:
         """Load all sessions from the database, keyed by ID."""
@@ -67,7 +68,7 @@ class SqliteRepository(IRepository):
                 SELECT s.id, s.filepath, s.clean_title, s.season_number, s.is_user_locked_title,
                        s.genres, s.rating, s.description, s.poster_path,
                        s.year, s.tmdb_id, s.backdrop_path, s.vote_average, 
-                       s.vote_count, s.runtime_minutes, s.is_metadata_fetched,
+                       s.vote_count, s.runtime_minutes, s.is_metadata_fetched, s.archived,
                        p.last_played_file, p.last_played_index, p.position, 
                        p.duration, p.is_finished, p.timestamp
                 FROM sessions s
@@ -94,7 +95,7 @@ class SqliteRepository(IRepository):
                 SELECT s.id, s.filepath, s.clean_title, s.season_number, s.is_user_locked_title,
                        s.genres, s.rating, s.description, s.poster_path,
                        s.year, s.tmdb_id, s.backdrop_path, s.vote_average, 
-                       s.vote_count, s.runtime_minutes, s.is_metadata_fetched,
+                       s.vote_count, s.runtime_minutes, s.is_metadata_fetched, s.archived,
                        p.last_played_file, p.last_played_index, p.position, 
                        p.duration, p.is_finished, p.timestamp
                 FROM sessions s
@@ -116,8 +117,8 @@ class SqliteRepository(IRepository):
                 (id, filepath, clean_title, season_number, is_user_locked_title,
                  genres, rating, description, poster_path,
                  year, tmdb_id, backdrop_path, vote_average, vote_count, 
-                 runtime_minutes, is_metadata_fetched)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 runtime_minutes, is_metadata_fetched, archived)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                 filepath=excluded.filepath,
                 clean_title=excluded.clean_title,
@@ -133,7 +134,8 @@ class SqliteRepository(IRepository):
                 vote_average=excluded.vote_average,
                 vote_count=excluded.vote_count,
                 runtime_minutes=excluded.runtime_minutes,
-                is_metadata_fetched=excluded.is_metadata_fetched
+                is_metadata_fetched=excluded.is_metadata_fetched,
+                archived=excluded.archived
             """, (
                 session.id,
                 session.filepath,
@@ -150,7 +152,8 @@ class SqliteRepository(IRepository):
                 session.metadata.vote_average,
                 session.metadata.vote_count,
                 session.metadata.runtime_minutes,
-                int(session.metadata.is_metadata_fetched)
+                int(session.metadata.is_metadata_fetched),
+                int(session.archived)
             ))
             
             # Upsert playback state
@@ -255,6 +258,8 @@ class SqliteRepository(IRepository):
     def get_most_watched(self, limit: int = MOST_WATCHED_LIMIT) -> List[Tuple[str, float]]:
         """Get most watched shows/movies by total watch time (wall clock)."""
         with self.db.connection() as conn:
+            # Group by TMDB ID when available, otherwise fall back to session ID
+            # This ensures sessions with the same TMDB ID are aggregated together
             rows = conn.execute("""
                 SELECT s.clean_title, 
                        COALESCE(SUM(
@@ -262,7 +267,10 @@ class SqliteRepository(IRepository):
                        ), 0) as watch_time
                 FROM sessions s
                 LEFT JOIN watch_events w ON w.session_id = s.id
-                GROUP BY s.id
+                GROUP BY CASE 
+                    WHEN s.tmdb_id IS NOT NULL AND s.tmdb_id != '' THEN s.tmdb_id 
+                    ELSE s.id 
+                END
                 ORDER BY watch_time DESC
                 LIMIT ?
             """, (limit,)).fetchall()
@@ -283,18 +291,37 @@ class SqliteRepository(IRepository):
             return {row['date']: row['minutes'] for row in rows}
     
     def get_viewing_patterns(self) -> Dict[int, float]:
-        """Get viewing patterns by hour of day (hour -> minutes watched, wall clock)."""
+        """Get viewing patterns by hour of day (hour -> minutes watched, wall clock).
+        
+        Accurately distributes watch time across all hours spanned by each event,
+        rather than attributing the entire duration to just the start hour.
+        """
         with self.db.connection() as conn:
             rows = conn.execute("""
-                SELECT CAST(strftime('%H', started_at) AS INTEGER) as hour,
-                       COALESCE(SUM(
-                           (julianday(ended_at) - julianday(started_at)) * 1440
-                       ), 0) as minutes
-                FROM watch_events
-                GROUP BY hour
-                ORDER BY hour
+                SELECT started_at, ended_at FROM watch_events
             """).fetchall()
-            return {row['hour']: row['minutes'] for row in rows}
+        
+        hourly_minutes: Dict[int, float] = {}
+        
+        for row in rows:
+            start = datetime.fromisoformat(row['started_at'])
+            end = datetime.fromisoformat(row['ended_at'])
+            
+            # Walk through each hour boundary
+            current = start
+            while current < end:
+                hour = current.hour
+                # Calculate end of this hour slot
+                next_hour = current.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+                slot_end = min(next_hour, end)
+                
+                # Add minutes for this hour
+                minutes_in_slot = (slot_end - current).total_seconds() / 60
+                hourly_minutes[hour] = hourly_minutes.get(hour, 0.0) + minutes_in_slot
+                
+                current = slot_end
+        
+        return hourly_minutes
     
     def get_watch_history(self, limit: int = WATCH_HISTORY_LIMIT) -> List[WatchEvent]:
         """Get recent watch history timeline."""

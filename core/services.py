@@ -274,7 +274,14 @@ class LibraryService:
         index_to_play = last_played_index_from_session # Default to current
         start_time = position_from_session # Default to current position
 
-        if session.playback.is_finished:
+        # Check if episode should be considered finished (either by flag or by threshold)
+        completion = 0.0
+        if session.playback.duration > 0:
+            completion = session.playback.position / session.playback.duration
+        
+        episode_finished = session.playback.is_finished or (completion > EPISODE_COMPLETION_THRESHOLD)
+        
+        if episode_finished:
             next_index = last_played_index_from_session + 1
             if next_index < len(series_files):
                 # There are more episodes, play the next one from the beginning
