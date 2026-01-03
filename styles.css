@@ -745,16 +745,29 @@ a:hover,
 
 .viewing-patterns {
     display: flex;
-    align-items: flex-end;
+    justify-content: space-between; /* Distribute columns evenly */
+    align-items: stretch;
     gap: 2px;
-    height: 100px;
+    height: 120px; /* Increased height slightly to accommodate labels */
 }
 
-.pattern-bar-container {
+/* Individual column holding Bar + Label */
+.pattern-col {
     flex: 1;
-    height: 100%;
     display: flex;
-    align-items: flex-end;
+    flex-direction: column;
+    min-width: 0;
+    /*allow text to overflow but not columns*/
+    cursor: default;
+
+}
+
+/* The area where the bar grows upwards */
+.bar-wrapper {
+    flex: 1; /* Takes up all available space above the label */
+    display: flex;
+    align-items: flex-end; /* Anchors bar to the bottom */
+    padding-bottom: 4px; /* Space between bar and label */
 }
 
 .pattern-bar {
@@ -762,23 +775,23 @@ a:hover,
     min-height: 2px;
     background: linear-gradient(180deg, rgba(139, 92, 246, 0.9), rgba(109, 40, 217, 0.6));
     border-radius: 2px 2px 0 0;
-    transition: var(--transition-fast);
+    transition: all 0.2s ease;
 }
 
-.pattern-bar-container:hover .pattern-bar {
+.pattern-col:hover .pattern-bar {
     background: linear-gradient(180deg, rgba(167, 139, 250, 1), rgba(139, 92, 246, 0.9));
 }
 
-.pattern-labels {
-    display: flex;
-    justify-content: space-between;
-    padding-top: var(--space-2);
-    font-size: 0.75rem;
-    /* Increased from 0.65rem for accessibility */
+/* The Label styling */
+.pattern-label {
+    text-align: center;
+    font-size: 0.7rem;
     color: var(--color-text-dim);
     font-family: 'JetBrains Mono', monospace;
+    height: 16px;
+    line-height: 16px;
+    white-space: nowrap;
 }
-
 /* Empty State */
 .empty-state {
     background: var(--gradient-card);

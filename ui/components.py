@@ -415,28 +415,49 @@ def render_stats_page(stats_service, library_service):
             st.markdown(rankings_html, unsafe_allow_html=True)
         else:
             st.markdown('<div class="empty-state">No watch data recorded yet</div>', unsafe_allow_html=True)
-    
     with col_right:
         st.markdown('<div class="section-header">Viewing Patterns</div>', unsafe_allow_html=True)
+        
         if stats.viewing_patterns and any(v > 0 for v in stats.viewing_patterns.values()):
             max_minutes = max(stats.viewing_patterns.values())
+            
             pattern_html = '<div class="patterns-container"><div class="viewing-patterns">'
-            # Start at 6am and wrap around (6, 7, ..., 23, 0, 1, ..., 5)
+            
             for i in range(24):
                 hour = (6 + i) % 24
                 minutes = stats.viewing_patterns.get(hour, 0)
                 height_pct = (minutes / max_minutes * 100) if max_minutes > 0 else 0
-                time_label = f"{hour:02d}:00"
-                pattern_html += f'''<div class="pattern-bar-container" title="{time_label}: {int(minutes)}m">
-<div class="pattern-bar" style="height: {height_pct}%"></div>
-</div>'''
-            pattern_html += '</div>'
-            pattern_html += '<div class="pattern-labels"><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span><span>6am</span></div>'
-            pattern_html += '</div>'
+                
+                # --- LABEL LOGIC CHANGED HERE ---
+                # Only show label if i is 0 (6am), 6 (12pm), 12 (6pm), or 18 (12am)
+                if i % 6 == 0:
+                    display_hour = hour if hour <= 12 else hour - 12
+                    if display_hour == 0: display_hour = 12
+                    
+                    suffix = ""
+                    if hour == 12: suffix = "pm"
+                    elif hour == 0: suffix = "am"
+                    elif hour == 6: suffix = "am" 
+                    elif hour == 18: suffix = "pm"
+
+                    label_text = f"{display_hour}{suffix}"
+                else:
+                    # Keep the div but leave text empty to maintain spacing alignment
+                    label_text = "&nbsp;" 
+
+                pattern_html += f'''
+                <div class="pattern-col" title="{hour:02d}:00 - {int(minutes)}m">
+                    <div class="bar-wrapper">
+                        <div class="pattern-bar" style="height: {height_pct}%"></div>
+                    </div>
+                    <div class="pattern-label">{label_text}</div>
+                </div>'''
+                
+            pattern_html += '</div></div>'
             st.markdown(pattern_html, unsafe_allow_html=True)
         else:
             st.markdown('<div class="empty-state">No viewing pattern data yet</div>', unsafe_allow_html=True)
-
+            
     st.markdown("<div style='height: 2rem'></div>", unsafe_allow_html=True)
     st.markdown('<div class="section-header">Recent History</div>', unsafe_allow_html=True)
     
