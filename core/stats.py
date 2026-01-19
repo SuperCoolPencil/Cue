@@ -16,10 +16,10 @@ class WatchStats:
     total_watch_time: float  # in seconds
     most_watched: List[Tuple[str, float]]  # (title, seconds)
     watch_streak: Dict[str, int]  # date string -> minutes
-    completion_rate: float  # 0.0 to 1.0
+    weekly_watch_time: float  # watch time in last 7 days (seconds)
+    daily_average: float  # average watch time per active day (seconds)
     viewing_patterns: Dict[int, float]  # hour (0-23) -> minutes
     library_size: int
-    completed_count: int
     recent_history: List['WatchEvent']
 
 
@@ -62,20 +62,32 @@ class StatsService:
     def get_all_stats(self) -> WatchStats:
         """Get all watch statistics in one call."""
         sessions = self.repo.load_all_sessions()
-        completed = sum(1 for s in sessions.values() if s.playback.is_finished)
         watch_streak = self.repo.get_streak_calendar(days=365)
         
         # Calculate dynamic thresholds from watch history
         self._streak_thresholds = self._calculate_dynamic_thresholds(watch_streak)
         
+        # Calculate weekly watch time (last 7 days)
+        today = datetime.now().date()
+        weekly_minutes = 0
+        for i in range(7):
+            date_str = (today - timedelta(days=i)).isoformat()
+            weekly_minutes += watch_streak.get(date_str, 0)
+        weekly_watch_time = weekly_minutes * 60  # Convert to seconds
+        
+        # Calculate daily average (only counting days with activity)
+        active_days = [v for v in watch_streak.values() if v > 0]
+        daily_avg_minutes = sum(active_days) / len(active_days) if active_days else 0
+        daily_average = daily_avg_minutes * 60  # Convert to seconds
+        
         return WatchStats(
             total_watch_time=self.repo.get_total_watch_time(),
             most_watched=self.repo.get_most_watched(limit=10),
             watch_streak=watch_streak,
-            completion_rate=completed / len(sessions) if sessions else 0.0,
+            weekly_watch_time=weekly_watch_time,
+            daily_average=daily_average,
             viewing_patterns=self.repo.get_viewing_patterns(),
             library_size=len(sessions),
-            completed_count=completed,
             recent_history=self.repo.get_watch_history(limit=50)
         )
     

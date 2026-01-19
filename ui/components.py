@@ -332,7 +332,8 @@ def render_stats_page(stats_service, library_service):
     stats = stats_service.get_all_stats()
     
     watch_time_str = stats_service.format_watch_time(stats.total_watch_time)
-    completion_pct = f"{stats.completion_rate * 100:.0f}%"
+    weekly_time_str = stats_service.format_watch_time(stats.weekly_watch_time)
+    daily_avg_str = stats_service.format_watch_time(stats.daily_average)
     
     metrics_html = f'''<div class="stats-grid">
 <div class="stat-card">
@@ -340,16 +341,16 @@ def render_stats_page(stats_service, library_service):
 <div class="stat-label">Library Items</div>
 </div>
 <div class="stat-card">
-<div class="stat-value">{stats.completed_count}</div>
-<div class="stat-label">Completed</div>
+<div class="stat-value">{weekly_time_str if weekly_time_str else "0s"}</div>
+<div class="stat-label">This Week</div>
 </div>
 <div class="stat-card">
-<div class="stat-value">{completion_pct}</div>
-<div class="stat-label">Completion Rate</div>
+<div class="stat-value">{daily_avg_str if daily_avg_str else "0s"}</div>
+<div class="stat-label">Daily Avg</div>
 </div>
 <div class="stat-card">
 <div class="stat-value">{watch_time_str if watch_time_str else "0s"}</div>
-<div class="stat-label">Watch Time</div>
+<div class="stat-label">Total Watch Time</div>
 </div>
 </div>'''
     st.markdown(metrics_html, unsafe_allow_html=True)

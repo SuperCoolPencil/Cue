@@ -1,8 +1,9 @@
 import os
 import uuid
+import threading
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Set, Callable
 
 from core.config import (
     MIN_WATCH_DURATION_SECONDS,
@@ -22,6 +23,135 @@ from core.interfaces import IPlayerDriver, IRepository
 from core.utils import get_media_files
 from core.providers.metadata_provider import get_metadata_provider, TMDBProvider
 
+
+class AsyncMetadataFetcher:
+    """
+    Handles asynchronous TMDB metadata fetching using background threads.
+    Tracks pending fetches and provides callbacks for completion.
+    """
+    
+    def __init__(self):
+        self._pending_fetches: Set[str] = set()  # Session IDs currently being fetched
+        self._lock = threading.Lock()
+        self._on_complete_callbacks: List[Callable[[str], None]] = []
+    
+    def is_fetching(self, session_id: str) -> bool:
+        """Check if a session's metadata is currently being fetched."""
+        with self._lock:
+            return session_id in self._pending_fetches
+    
+    def add_completion_callback(self, callback: Callable[[str], None]) -> None:
+        """Add a callback to be called when a fetch completes."""
+        self._on_complete_callbacks.append(callback)
+    
+    def fetch_async(self, session: Session, repository: 'IRepository') -> None:
+        """
+        Start an async metadata fetch for the given session.
+        Returns immediately; fetch happens in background thread.
+        """
+        if session.metadata.is_metadata_fetched:
+            return
+        
+        with self._lock:
+            if session.id in self._pending_fetches:
+                return  # Already fetching
+            self._pending_fetches.add(session.id)
+        
+        # Start background thread for the fetch
+        thread = threading.Thread(
+            target=self._do_fetch,
+            args=(session, repository),
+            daemon=True
+        )
+        thread.start()
+    
+    def _do_fetch(self, session: Session, repository: 'IRepository') -> None:
+        """Perform the actual metadata fetch in background thread."""
+        try:
+            self._fetch_metadata(session)
+            repository.save_session(session)
+            
+            # Notify callbacks
+            for callback in self._on_complete_callbacks:
+                try:
+                    callback(session.id)
+                except Exception as e:
+                    print(f"Error in metadata fetch callback: {e}")
+        except Exception as e:
+            print(f"Error fetching metadata for {session.id}: {e}")
+        finally:
+            with self._lock:
+                self._pending_fetches.discard(session.id)
+    
+    def _fetch_metadata(self, session: Session) -> None:
+        """
+        Fetch metadata from TMDB for the session.
+        This is the core fetch logic, now running in a background thread.
+        """
+        print(f"DEBUG AsyncMetadataFetcher: Starting fetch for '{session.metadata.clean_title}'")
+        
+        provider = get_metadata_provider()
+        if not provider.is_configured:
+            print("DEBUG AsyncMetadataFetcher: TMDB API key not configured. Skipping.")
+            session.metadata.is_metadata_fetched = True
+            return
+        
+        # Use guessit to get year and media type hints
+        year = None
+        media_type = None
+        
+        if guessit:
+            try:
+                guessed = guessit(session.filepath)
+                year = guessed.get('year')
+                if guessed.get('type') == 'episode' or 'season' in guessed or 'episode' in guessed:
+                    media_type = 'tv'
+                else:
+                    media_type = 'movie'
+                print(f"DEBUG AsyncMetadataFetcher: Guessit result - year={year}, media_type={media_type}")
+            except Exception as e:
+                print(f"Guessit error during metadata fetch: {e}")
+        
+        try:
+            print(f"DEBUG AsyncMetadataFetcher: Calling provider.search('{session.metadata.clean_title}')")
+            info = provider.search(
+                title=session.metadata.clean_title,
+                year=year,
+                media_type=media_type
+            )
+            
+            if info:
+                print(f"DEBUG AsyncMetadataFetcher: Got result - {info.title}, poster={info.poster_path}")
+                session.metadata.description = info.overview
+                session.metadata.poster_path = provider.get_poster_url(info.poster_path) if info.poster_path else None
+                session.metadata.backdrop_path = provider.get_backdrop_url(info.backdrop_path) if info.backdrop_path else None
+                session.metadata.genres = info.genres or []
+                session.metadata.vote_average = info.vote_average
+                session.metadata.vote_count = info.vote_count
+                session.metadata.year = info.year
+                session.metadata.tmdb_id = info.tmdb_id
+                session.metadata.runtime_minutes = info.runtime_minutes
+                session.metadata.is_metadata_fetched = True
+                print(f"DEBUG AsyncMetadataFetcher: Updated metadata - poster_path={session.metadata.poster_path}")
+            else:
+                session.metadata.is_metadata_fetched = True
+                print(f"DEBUG AsyncMetadataFetcher: No TMDB results for: {session.metadata.clean_title}")
+        except Exception as e:
+            print(f"DEBUG AsyncMetadataFetcher: Error - {e}")
+            session.metadata.is_metadata_fetched = True
+
+
+# Global async fetcher instance
+_async_fetcher: Optional[AsyncMetadataFetcher] = None
+
+
+def get_async_fetcher() -> AsyncMetadataFetcher:
+    """Get the singleton async metadata fetcher."""
+    global _async_fetcher
+    if _async_fetcher is None:
+        _async_fetcher = AsyncMetadataFetcher()
+    return _async_fetcher
+
 class LibraryService:
     """
     Manages the media library, handling session creation, playback,
@@ -34,6 +164,8 @@ class LibraryService:
         self.sessions: Dict[str, Session] = self.repository.load_all_sessions() # Keyed by ID
         # Create a reverse index for fast lookup by filepath
         self._filepath_index: Dict[str, str] = {s.filepath: s.id for s in self.sessions.values()}
+        # Get the async metadata fetcher
+        self._async_fetcher = get_async_fetcher()
 
     def get_or_create_session(self, filepath: str) -> Session:
         """
@@ -79,84 +211,44 @@ class LibraryService:
         )
         new_session = Session(id=session_id, filepath=filepath, metadata=metadata)
         
-        # Try to fetch TMDB metadata for new sessions
-        self._try_fetch_metadata(new_session)
-        
-        self.repository.save_session(new_session) # Persist new session
+        # Save the session first so it appears in the UI immediately
+        self.repository.save_session(new_session)
         self.sessions[session_id] = new_session
         self._filepath_index[filepath] = session_id
+        
+        # Start async TMDB metadata fetch (non-blocking)
+        self._async_fetcher.fetch_async(new_session, self.repository)
+        
         return new_session
 
-    def _try_fetch_metadata(self, session: Session) -> None:
+    def is_metadata_fetching(self, session_id: str) -> bool:
         """
-        Try to fetch metadata from TMDB for the session.
-        Only fetches if not already fetched and title is not user-locked.
+        Check if metadata is currently being fetched for a session.
+        Useful for showing loading indicators in the UI.
         """
-        print(f"DEBUG _try_fetch_metadata: Starting for '{session.metadata.clean_title}'")
-        print(f"DEBUG _try_fetch_metadata: is_fetched={session.metadata.is_metadata_fetched}, is_locked={session.metadata.is_user_locked_title}")
-        
-        if session.metadata.is_metadata_fetched:
-            print("DEBUG _try_fetch_metadata: Skipping - already fetched")
-            return
-        
-        provider = get_metadata_provider()
-        if not provider.is_configured:
-            print("DEBUG _try_fetch_metadata: TMDB API key not configured. Skipping.")
-            return
-        
-        # Use guessit to get year and media type hints
-        year = None
-        media_type = None
-        
-        if guessit:
-            try:
-                guessed = guessit(session.filepath)
-                year = guessed.get('year')
-                # Determine if it's a TV show or movie based on guessit
-                if guessed.get('type') == 'episode' or 'season' in guessed or 'episode' in guessed:
-                    media_type = 'tv'
-                else:
-                    media_type = 'movie'
-                print(f"DEBUG _try_fetch_metadata: Guessit result - year={year}, media_type={media_type}")
-            except Exception as e:
-                print(f"Guessit error during metadata fetch: {e}")
-        
-        try:
-            print(f"DEBUG _try_fetch_metadata: Calling provider.search('{session.metadata.clean_title}')")
-            info = provider.search(
-                title=session.metadata.clean_title,
-                year=year,
-                media_type=media_type
-            )
-            
-            if info:
-                print(f"DEBUG _try_fetch_metadata: Got result - {info.title}, poster={info.poster_path}")
-                # Update metadata with TMDB info
-                session.metadata.description = info.overview
-                session.metadata.poster_path = provider.get_poster_url(info.poster_path) if info.poster_path else None
-                session.metadata.backdrop_path = provider.get_backdrop_url(info.backdrop_path) if info.backdrop_path else None
-                session.metadata.genres = info.genres or []
-                session.metadata.vote_average = info.vote_average
-                session.metadata.vote_count = info.vote_count
-                session.metadata.year = info.year
-                session.metadata.tmdb_id = info.tmdb_id
-                session.metadata.runtime_minutes = info.runtime_minutes
-                session.metadata.is_metadata_fetched = True
-                print(f"DEBUG _try_fetch_metadata: Updated metadata - poster_path={session.metadata.poster_path}")
-            else:
-                # Mark as fetched even if not found to avoid repeated API calls
-                session.metadata.is_metadata_fetched = True
-                print(f"DEBUG _try_fetch_metadata: No TMDB results for: {session.metadata.clean_title}")
-        except Exception as e:
-            print(f"DEBUG _try_fetch_metadata: Error - {e}")
+        return self._async_fetcher.is_fetching(session_id)
 
     def refresh_metadata(self, session: Session) -> Session:
         """
         Force refresh metadata from TMDB, even if already fetched.
+        Starts an async fetch and returns immediately.
         """
-        # Temporarily clear the fetched flag to allow re-fetch
+        # Clear the fetched flag to allow re-fetch
         session.metadata.is_metadata_fetched = False
-        self._try_fetch_metadata(session)
+        self.repository.save_session(session)
+        
+        # Start async fetch
+        self._async_fetcher.fetch_async(session, self.repository)
+        return session
+    
+    def refresh_metadata_sync(self, session: Session) -> Session:
+        """
+        Force refresh metadata from TMDB synchronously.
+        Blocks until the fetch completes. Use for cases where
+        you need the metadata immediately.
+        """
+        session.metadata.is_metadata_fetched = False
+        self._async_fetcher._fetch_metadata(session)
         self.repository.save_session(session)
         return session
 
