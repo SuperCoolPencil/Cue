@@ -252,24 +252,30 @@ class LibraryService:
         self.repository.save_session(session)
         return session
 
-    def fetch_metadata_by_id(self, session: Session, tmdb_id: int, media_type: str = "movie") -> Session:
+    def fetch_metadata_by_id(self, session: Session, tmdb_id: int, media_type: str = "movie") -> tuple[Session, bool, str]:
         """
         Fetch metadata from TMDB using a specific TMDB ID.
         This allows manual override when auto-search fails.
+        
+        Returns:
+            Tuple of (session, success, message)
         """
         print(f"DEBUG fetch_metadata_by_id: Fetching {media_type}/{tmdb_id}")
         
         provider = get_metadata_provider()
         if not provider.is_configured:
-            print("DEBUG fetch_metadata_by_id: TMDB API key not configured")
-            return session
+            return session, False, "TMDB API key not configured"
         
         try:
             # Directly fetch details by ID
-            details = provider._get(f"{media_type}/{tmdb_id}")
+            details, error = provider._get(f"{media_type}/{tmdb_id}")
+            
+            if error:
+                return session, False, error
             
             if details:
-                print(f"DEBUG fetch_metadata_by_id: Got result - {details.get('title') or details.get('name')}")
+                title = details.get('title') or details.get('name')
+                print(f"DEBUG fetch_metadata_by_id: Got result - {title}")
                 
                 # Get genres as names
                 genres = [g.get('name') for g in details.get('genres', [])]
@@ -286,7 +292,7 @@ class LibraryService:
                     runtime = runtimes[0] if runtimes else None
                 
                 # Update metadata
-                session.metadata.clean_title = details.get('title') or details.get('name') or session.metadata.clean_title
+                session.metadata.clean_title = title or session.metadata.clean_title
                 session.metadata.description = details.get('overview')
                 session.metadata.poster_path = provider.get_poster_url(details.get('poster_path')) if details.get('poster_path') else None
                 session.metadata.backdrop_path = provider.get_backdrop_url(details.get('backdrop_path')) if details.get('backdrop_path') else None
@@ -299,13 +305,12 @@ class LibraryService:
                 session.metadata.is_metadata_fetched = True
                 
                 self.repository.save_session(session)
-                print(f"DEBUG fetch_metadata_by_id: Updated metadata for {session.metadata.clean_title}")
+                return session, True, f"Found: {title}"
             else:
-                print(f"DEBUG fetch_metadata_by_id: No results for {media_type}/{tmdb_id}")
+                return session, False, f"No {media_type} found with ID {tmdb_id}"
         except Exception as e:
             print(f"DEBUG fetch_metadata_by_id: Error - {e}")
-        
-        return session
+            return session, False, f"Error: {str(e)}"
 
     def update_session_metadata(self, filepath: str, clean_title: Optional[str] = None, 
                                 season_number: Optional[int] = None, 

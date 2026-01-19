@@ -75,14 +75,19 @@ class TMDBProvider(IMetadataProvider):
         """Check if API key is available."""
         return bool(self.api_key)
     
-    def _get(self, endpoint: str, params: dict = None) -> Optional[dict]:
-        """Make authenticated GET request to TMDB API with retry logic."""
+    def _get(self, endpoint: str, params: dict = None) -> tuple[Optional[dict], Optional[str]]:
+        """Make authenticated GET request to TMDB API with retry logic.
+        
+        Returns:
+            Tuple of (data, error_message). If successful, error is None.
+        """
         if not self.is_configured:
             print("DEBUG TMDBProvider._get: API key not configured, skipping request")
-            return None
+            return None, "TMDB API key not configured"
         
         import time
         max_retries = 3
+        last_error = None
         
         for attempt in range(max_retries):
             try:
@@ -93,24 +98,39 @@ class TMDBProvider(IMetadataProvider):
                 print(f"DEBUG TMDBProvider._get: Requesting {url} (attempt {attempt + 1})")
                 response = requests.get(url, params=params, timeout=15)
                 print(f"DEBUG TMDBProvider._get: Response status {response.status_code}")
+                
+                if response.status_code == 404:
+                    return None, "Not found on TMDB"
+                elif response.status_code == 401:
+                    return None, "Invalid TMDB API key"
+                elif response.status_code == 429:
+                    return None, "TMDB rate limit exceeded - try again later"
+                
                 response.raise_for_status()
-                return response.json()
+                return response.json(), None
+            except requests.exceptions.Timeout:
+                last_error = "Request timed out - TMDB may be slow"
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
             except requests.exceptions.ConnectionError as e:
+                last_error = "Network connection error - check your internet"
                 print(f"DEBUG TMDBProvider._get: Connection error (attempt {attempt + 1}): {e}")
                 if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                    time.sleep(2 ** attempt)
                     continue
-                return None
             except requests.RequestException as e:
+                last_error = f"API error: {str(e)}"
                 print(f"TMDB API error: {e}")
-                return None
-        return None
+                break
+        
+        return None, last_error or "Unknown error"
     
     @lru_cache(maxsize=1)
     def _get_genre_map(self, media_type: str) -> dict:
         """Get genre ID to name mapping (cached)."""
         endpoint = f"genre/{media_type}/list"
-        data = self._get(endpoint)
+        data, _ = self._get(endpoint)
         if data and "genres" in data:
             return {g["id"]: g["name"] for g in data["genres"]}
         return {}
@@ -162,7 +182,7 @@ class TMDBProvider(IMetadataProvider):
         if year:
             params["year" if media_type == "movie" else "first_air_date_year"] = year
         
-        data = self._get(f"search/{media_type}", params)
+        data, _ = self._get(f"search/{media_type}", params)
         if not data or not data.get("results"):
             return None
         
@@ -170,7 +190,7 @@ class TMDBProvider(IMetadataProvider):
         item = data["results"][0]
         
         # Get additional details for runtime
-        details = self._get(f"{media_type}/{item['id']}")
+        details, _ = self._get(f"{media_type}/{item['id']}")
         runtime = None
         if details:
             if media_type == "movie":

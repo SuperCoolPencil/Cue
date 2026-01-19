@@ -89,9 +89,17 @@ def edit_metadata_dialog():
     
     if st.button("Fetch by ID", key="modal_fetch", use_container_width=True):
         if new_tmdb_id and new_tmdb_id.isdigit():
-            library_service.fetch_metadata_by_id(session, int(new_tmdb_id), media_type)
-            st.session_state.pop('edit_modal_session', None)
-            st.rerun()
+            with st.spinner(f"Fetching {media_type} #{new_tmdb_id} from TMDB..."):
+                _, success, message = library_service.fetch_metadata_by_id(session, int(new_tmdb_id), media_type)
+            
+            if success:
+                st.success(message)
+                import time
+                time.sleep(1)  # Brief pause to show success message
+                st.session_state.pop('edit_modal_session', None)
+                st.rerun()
+            else:
+                st.error(message)
         else:
             st.error("Please enter a valid TMDB ID")
     
