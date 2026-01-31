@@ -46,7 +46,7 @@ from dotenv import load_dotenv
 # Load .env file if it exists
 load_dotenv()
 
-TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "1f79ab14926c11fa2a58f30d05e4dada")
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY")
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/"
 TMDB_POSTER_SIZE = "w500"
 TMDB_BACKDROP_SIZE = "w1280"

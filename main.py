@@ -61,6 +61,11 @@ def main():
         # Library Page
         st.markdown('<div class="main-header">Cue.</div>', unsafe_allow_html=True)
         
+        # Check for TMDB configuration
+        from core.providers.metadata_provider import get_metadata_provider
+        if not get_metadata_provider().is_configured:
+            st.warning("⚠️ TMDB API Key is not configured. Metadata will not be fetched. Check your .env file.")
+        
         # Filter out archived sessions for the main library view
         active_sessions = {sid: s for sid, s in st.session_state.sessions.items() if not s.archived}
         st.markdown(f'<div class="sub-header">Resume where you left off • {len(active_sessions)} items</div>', unsafe_allow_html=True)
