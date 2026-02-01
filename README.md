@@ -38,6 +38,7 @@
     Create a `.env` file in the root directory:
     ```bash
     TMDB_API_KEY="your_api_key_here"
+    OPENSUBTITLES_API_KEY="your_opensubtitles_key_here" # Optional, for subtitles
     ```
 3.  Run the application:
     ```bash

@@ -61,6 +61,26 @@ def edit_metadata_dialog():
             st.rerun()
     
     st.markdown("---")
+    
+    # Subtitles Section
+    st.markdown("**Subtitles**")
+    
+    col_sub1, col_sub2 = st.columns([0.7, 0.3])
+    
+    with col_sub1:
+         st.write("Search and download subtitles powered by OpenSubtitles.")
+    
+    with col_sub2:
+        if st.button("Search Subs", key="modal_search_subs", use_container_width=True):
+            st.session_state['show_subtitle_modal'] = True
+            st.rerun()
+
+    # Subtitle Modal logic (nested inside this dialog for simplicity, or separate)
+    if st.session_state.get('show_subtitle_modal'):
+        subtitle_modal(session, library_service)
+        
+
+    st.markdown("---")
     st.markdown("**Fetch by TMDB ID**")
     
     # TMDB ID input
@@ -106,6 +126,61 @@ def edit_metadata_dialog():
     # Close button at the bottom
     if st.button("Close", key="modal_close", use_container_width=True):
         st.session_state.pop('edit_modal_session', None)
+        st.rerun()
+
+@st.dialog("Subtitle Search")
+def subtitle_modal(session, library_service):
+    """Modal specifically for searching and downloading subtitles"""
+    
+    st.write(f"Searching subtitles for: **{session.metadata.clean_title}**")
+    
+    # Check API Key
+    from core.config import OPENSUBTITLES_API_KEY
+    if not OPENSUBTITLES_API_KEY:
+        st.error("⚠️ OpenSubtitles API Key is missing. Please add it to your .env file.")
+        if st.button("Close", key="sub_modal_close_err"):
+            st.session_state['show_subtitle_modal'] = False
+            st.rerun()
+        return
+
+    # Trigger search only once or when requested
+    if 'subtitle_results' not in st.session_state:
+        with st.spinner("Searching OpenSubtitles..."):
+            results = library_service.search_subtitles(session)
+            st.session_state['subtitle_results'] = results
+            
+    results = st.session_state.get('subtitle_results', [])
+    
+    if not results:
+        st.info("No subtitles found.")
+    else:
+        st.success(f"Found {len(results)} subtitles")
+        
+        # Display results
+        for idx, sub in enumerate(results):
+            col1, col2 = st.columns([0.75, 0.25])
+            with col1:
+                match_badge = "🔥 BEST MATCH" if sub.is_hash_match else ""
+                st.markdown(f"**{sub.language}** | {sub.format} | ⬇️ {sub.download_count} {match_badge}")
+                st.caption(sub.filename)
+            with col2:
+                if st.button("Download", key=f"dl_sub_{sub.id}_{idx}", use_container_width=True):
+                    with st.spinner("Downloading..."):
+                        success, msg = library_service.download_subtitle(session, sub.id)
+                        if success:
+                            st.toast(f"Subtitle downloaded! ({msg})", icon="✅")
+                            # Close modals
+                            st.session_state['show_subtitle_modal'] = False
+                            # Optional: Clear results for next time
+                            del st.session_state['subtitle_results']
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                            
+    st.markdown("---")
+    if st.button("Close", key="sub_modal_close"):
+        st.session_state['show_subtitle_modal'] = False
+        del st.session_state['subtitle_results']
         st.rerun()
 
 

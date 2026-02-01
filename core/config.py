@@ -41,15 +41,23 @@ WATCH_HISTORY_LIMIT = 50
 
 # TMDB API settings - can be overridden via TMDB_API_KEY environment variable
 import os
-from dotenv import load_dotenv
-
 # Load .env file if it exists
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY")
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/"
 TMDB_POSTER_SIZE = "w500"
 TMDB_BACKDROP_SIZE = "w1280"
+
+# OpenSubtitles Configuration
+OPENSUBTITLES_API_KEY = os.environ.get("OPENSUBTITLES_API_KEY")
+OPENSUBTITLES_BASE_URL = "https://api.opensubtitles.com/api/v1"
+# User agent is required. Using a temporary generic one if not set.
+OPENSUBTITLES_USER_AGENT = os.environ.get("OPENSUBTITLES_USER_AGENT", "CueMediaApp v1.0")
 
 # Days before re-fetching metadata (0 = never re-fetch)
 METADATA_CACHE_DAYS = 30

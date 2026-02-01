@@ -504,3 +504,69 @@ class LibraryService:
             return (next_index, os.path.basename(series_files[next_index]))
         return None
 
+    # === Subtitle Support ===
+    
+    def search_subtitles(self, session: Session) -> List['SubtitleInfo']:
+        """Search for subtitles for the current file."""
+        from core.providers.subtitle_provider import get_subtitle_provider, SubtitleInfo
+        
+        provider = get_subtitle_provider()
+        if not provider.is_configured:
+            return []
+            
+        # Determine actual file path (helper for series)
+        filepath = session.filepath
+        series_files = self.get_series_files(session)
+        if series_files and session.playback.last_played_index < len(series_files):
+            filepath = series_files[session.playback.last_played_index]
+            
+        if not os.path.exists(filepath):
+            return []
+            
+        return provider.search(filepath)
+
+    def download_subtitle(self, session: Session, subtitle_id: str) -> Tuple[bool, str]:
+        """
+        Download a subtitle and save it next to the media file.
+        Returns: (Success, Message)
+        """
+        from core.providers.subtitle_provider import get_subtitle_provider
+        import requests
+        
+        provider = get_subtitle_provider()
+        if not provider.is_configured:
+            return False, "Provider not configured"
+            
+        # Get download link
+        data = provider.download(subtitle_id)
+        if not data or 'link' not in data:
+            return False, "Failed to get download link"
+            
+        download_url = data['link']
+        filename = data.get('file_name', 'subtitle.srt')
+        
+        # Determine target path
+        filepath = session.filepath
+        series_files = self.get_series_files(session)
+        if series_files and session.playback.last_played_index < len(series_files):
+            filepath = series_files[session.playback.last_played_index]
+            
+        media_dir = os.path.dirname(filepath)
+        media_name = os.path.splitext(os.path.basename(filepath))[0]
+        
+        # Save as [media_name].srt (standard for players)
+        # If multiple languages, might want .en.srt etc, but keeping simple for now
+        target_path = os.path.join(media_dir, f"{media_name}.srt")
+        
+        try:
+            print(f"Downloading subtitle to {target_path}...")
+            r = requests.get(download_url)
+            r.raise_for_status()
+            
+            with open(target_path, 'wb') as f:
+                f.write(r.content)
+                
+            return True, f"Downloaded to {os.path.basename(target_path)}"
+        except Exception as e:
+            return False, f"Download failed: {str(e)}"
+
