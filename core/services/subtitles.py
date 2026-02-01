@@ -33,6 +33,7 @@ class SubtitleService:
                     
         # Sort by hash match (True first), then download count (desc)
         all_results.sort(key=lambda x: (x.is_hash_match, x.download_count), reverse=True)
+        print(f"DEBUG: Found {len(all_results)} subtitles total.")
         return all_results
 
     def _download_to_path(self, download_url: str, filepath: str) -> Tuple[bool, str]:
@@ -93,6 +94,7 @@ class SubtitleService:
         # Sort: Hash matches first
         provider_results.sort(key=lambda x: (x.is_hash_match, x.download_count), reverse=True)
         best_sub = provider_results[0]
+        print(f"DEBUG: Selected best subtitle: {best_sub.filename} (HashMatch={best_sub.is_hash_match}, DLs={best_sub.download_count})")
         
         return self.download_subtitle(Session(filepath, None, None), best_sub.id, series_files=[filepath])
 

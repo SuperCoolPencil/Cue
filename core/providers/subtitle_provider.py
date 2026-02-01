@@ -60,6 +60,7 @@ class OpenSubtitlesProvider(ISubtitleProvider):
             "Content-Type": "application/json"
         }
         payload = {"username": username, "password": password}
+        print(f"DEBUG [OpenSubtitles]: Attempting login for user: {username}")
         
         try:
             r = requests.post(f"{self.base_url}/login", json=payload, headers=headers)
@@ -138,6 +139,7 @@ class OpenSubtitlesProvider(ISubtitleProvider):
             params["moviehash"] = moviehash
         
         try:
+            print(f"DEBUG [OpenSubtitles]: Requesting subtitles with params: {params}")
             response = requests.get(
                 f"{self.base_url}/subtitles",
                 headers=self._get_headers(),
@@ -181,6 +183,7 @@ class OpenSubtitlesProvider(ISubtitleProvider):
         import requests
         
         try:
+            print(f"DEBUG [OpenSubtitles]: Requesting download for file_id: {file_id}")
             payload = {"file_id": int(file_id)}
             response = requests.post(
                 f"{self.base_url}/download",
