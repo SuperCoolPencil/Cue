@@ -42,7 +42,7 @@ def render_card(session_id: str, session, library_service):
     rating_html = ""
     if session.metadata.vote_average and session.metadata.vote_average > 0:
         rating = session.metadata.vote_average
-        rating_html = f'<span class="rating-badge">★ {rating:.1f}</span>'
+        rating_html = f'<span class="rating-badge">Rate: {rating:.1f}</span>'
     
     # Genres
     genre_html = ""
@@ -117,11 +117,11 @@ def render_card(session_id: str, session, library_service):
             c_folder, c_edit, c_del = st.columns([1, 1, 1], gap="small")
             
             with c_folder:
-                if st.button("📂", key=f"open_{k_id}", help="Show in File Manager", use_container_width=True):
+                if st.button("Open Folder", key=f"open_{k_id}", help="Show in File Manager", use_container_width=True):
                     open_in_file_manager(path)
 
             with c_edit:
-                if st.button("✎", key=f"edit_{k_id}", help="Edit Metadata", use_container_width=True):
+                if st.button("Edit", key=f"edit_{k_id}", help="Edit Metadata", use_container_width=True):
                     st.session_state['edit_modal_session'] = {
                         'session_id': session_id,
                         'session': session,
@@ -134,13 +134,13 @@ def render_card(session_id: str, session, library_service):
 
             with c_del:
                 if st.session_state.get('confirm_del') == session_id:
-                    if st.button("✓", key=f"y_{k_id}", use_container_width=True, help="Confirm Delete"):
+                    if st.button("Confirm", key=f"y_{k_id}", use_container_width=True, help="Confirm Delete"):
                         library_service.repository.delete_session(session_id)
                         st.session_state.sessions.pop(session_id, None)
                         st.session_state.pop('confirm_del', None)
                         st.rerun()
                 else:
-                    if st.button("✕", key=f"del_{k_id}", use_container_width=True, help="Remove from Library"):
+                    if st.button("Del", key=f"del_{k_id}", use_container_width=True, help="Remove from Library"):
                         st.session_state['confirm_del'] = session_id
                         st.rerun()
             

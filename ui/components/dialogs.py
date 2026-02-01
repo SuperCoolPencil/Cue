@@ -56,7 +56,7 @@ def edit_metadata_dialog():
     
     # Batch Download for Series (Folders)
     if os.path.isdir(path):
-        if st.button("⚡ Batch Auto-Download & Sync (All Episodes)", key=f"batch_subs_{session_id}", use_container_width=True):
+        if st.button("Batch Auto-Download & Sync (All Episodes)", key=f"batch_subs_{session_id}", use_container_width=True):
              with st.status("Processing batch subtitles...", expanded=True) as status:
                 def update_log(msg):
                     st.write(msg)
@@ -79,7 +79,7 @@ def edit_metadata_dialog():
             st.rerun()
             
     # Sync button
-    if st.button("🔄 Sync Subtitles (ffsync)", key="modal_sync_subs", use_container_width=True, help="Run ffsync on all subtitles in the folder"):
+    if st.button("Sync Subtitles (ffsync)", key="modal_sync_subs", use_container_width=True, help="Run ffsync on all subtitles in the folder"):
         with st.spinner("Syncing subtitles... (this may take a minute)"):
             success, msg = library_service.sync_subtitles(session)
             if success:
@@ -148,7 +148,7 @@ def subtitle_modal(session, library_service):
     # Check API Key
     from core.config import OPENSUBTITLES_API_KEY
     if not OPENSUBTITLES_API_KEY:
-        st.error("⚠️ OpenSubtitles API Key is missing. Please add it to your .env file.")
+        st.error("[Error] OpenSubtitles API Key is missing. Please add it to your .env file.")
         if st.button("Close", key="sub_modal_close_err"):
             st.session_state['show_subtitle_modal'] = False
             st.rerun()
@@ -170,16 +170,18 @@ def subtitle_modal(session, library_service):
         # Display results
         for idx, sub in enumerate(results):
             col1, col2 = st.columns([0.75, 0.25])
+        for idx, sub in enumerate(results):
+            col1, col2 = st.columns([0.75, 0.25])
             with col1:
-                match_badge = "🔥 BEST MATCH" if sub.is_hash_match else ""
-                st.markdown(f"**{sub.language}** | {sub.format} | ⬇️ {sub.download_count} {match_badge}")
+                match_badge = "[BEST MATCH]" if sub.is_hash_match else ""
+                st.markdown(f"**{sub.language}** | {sub.format} | Dl: {sub.download_count} {match_badge}")
                 st.caption(sub.filename)
             with col2:
                 if st.button("Download", key=f"dl_sub_{sub.id}_{idx}", use_container_width=True):
                     with st.spinner("Downloading..."):
                         success, msg = library_service.download_subtitle(session, sub.id)
                         if success:
-                            st.toast(f"Subtitle downloaded! ({msg})", icon="✅")
+                            st.toast(f"Subtitle downloaded! ({msg})")
                             # Close modals
                             st.session_state['show_subtitle_modal'] = False
                             # Optional: Clear results for next time

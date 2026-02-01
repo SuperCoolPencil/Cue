@@ -125,17 +125,17 @@ class SubtitleService:
             # 1. Download
             ok, msg = self.download_best_subtitle(filepath)
             if not ok:
-                log(f"  ❌ Download failed: {msg}")
+                log(f"  [Error] Download failed: {msg}")
                 fail_count += 1
                 continue
-            log(f"  ✅ {msg}")
+            log(f"  [OK] {msg}")
             
             # 2. Sync
             ok_sync, msg_sync = self._sync_single_file(filepath)
             if ok_sync:
-                log(f"  ✅ Synced")
+                log(f"  [Synced]")
             else:
-                log(f"  ⚠️ Sync skipped/failed: {msg_sync}")
+                log(f"  [Sync skipped/failed]: {msg_sync}")
                 
             success_count += 1
             

@@ -15,7 +15,7 @@ def render_archived_page(library_service):
     st.markdown(f'<div class="sub-header">{len(archived_items)} archived items</div>', unsafe_allow_html=True)
     
     if not archived_items:
-        st.info("📁 No archived items. Use the archive button on a session to move it here.")
+        st.info("No archived items. Use the archive button on a session to move it here.")
         return
     
     for session_id, session in archived_items:
