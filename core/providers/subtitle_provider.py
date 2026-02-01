@@ -5,7 +5,7 @@ import os
 import struct
 import hashlib
 from abc import ABC, abstractmethod
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass
 from core.config import OPENSUBTITLES_API_KEY, OPENSUBTITLES_BASE_URL, OPENSUBTITLES_USER_AGENT
 
@@ -30,8 +30,8 @@ class ISubtitleProvider(ABC):
         pass
         
     @abstractmethod
-    def download(self, subtitle_id: str) -> Optional[str]:
-        """Get the download details (url) for a subtitle."""
+    def download(self, subtitle_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Get the download details (url) for a subtitle. Returns (data, error_message)."""
         pass
 
 class OpenSubtitlesProvider(ISubtitleProvider):
@@ -41,46 +41,81 @@ class OpenSubtitlesProvider(ISubtitleProvider):
         self.api_key = OPENSUBTITLES_API_KEY
         self.base_url = OPENSUBTITLES_BASE_URL
         self.user_agent = OPENSUBTITLES_USER_AGENT
+        self.token = None
+        self.user_info = None
+        self._load_auth()
+
+    def _load_auth(self):
+        from core.settings import load_settings
+        settings = load_settings()
+        auth = settings.get("opensubtitles_auth", {})
+        self.token = auth.get("token")
+        self.user_info = auth.get("user")
+
+    def login(self, username, password) -> Tuple[bool, str]:
+        import requests
+        headers = {
+            "Api-Key": self.api_key,
+            "User-Agent": self.user_agent,
+            "Content-Type": "application/json"
+        }
+        payload = {"username": username, "password": password}
         
+        try:
+            r = requests.post(f"{self.base_url}/login", json=payload, headers=headers)
+            if r.status_code == 200:
+                data = r.json()
+                self.token = data.get("token")
+                self.user_info = data.get("user")
+                
+                # Persist
+                from core.settings import load_settings, save_settings
+                settings = load_settings()
+                settings["opensubtitles_auth"] = {
+                    "token": self.token,
+                    "user": self.user_info
+                }
+                save_settings(settings)
+                return True, "Logged in successfully"
+            else:
+                return False, r.json().get("message", "Login failed")
+        except Exception as e:
+            return False, str(e)
+
+    def logout(self) -> Tuple[bool, str]:
+        # Clear local state
+        self.token = None
+        self.user_info = None
+        
+        # Clear persistence
+        from core.settings import load_settings, save_settings
+        settings = load_settings()
+        if "opensubtitles_auth" in settings:
+            del settings["opensubtitles_auth"]
+            save_settings(settings)
+
+        # Optional: Call API logout if needed, but local clear is enough usually
+        # headers = ... requests.delete(..., headers=headers)
+        return True, "Logged out"
+
     @property
     def is_configured(self) -> bool:
         return bool(self.api_key)
 
     def calculate_hash(self, filepath: str) -> str:
-        """
-        Calculate OpenSubtitles moviehash.
-        Based on: https://trac.opensubtitles.org/projects/opensubtitles/wiki/HashSourceCodes
-        """
-        try:
-            longlongformat = '<q'  # little-endian long long
-            bytesize = struct.calcsize(longlongformat)
-            
-            with open(filepath, "rb") as f:
-                filesize = os.path.getsize(filepath)
-                hash_value = filesize
-                
-                if filesize < 65536 * 2:
-                    return ""
-                
-                # Read first 64k
-                for x in range(65536 // bytesize):
-                    buffer = f.read(bytesize)
-                    (l_value,) = struct.unpack(longlongformat, buffer)
-                    hash_value += l_value
-                    hash_value = hash_value & 0xFFFFFFFFFFFFFFFF
-                
-                # Read last 64k
-                f.seek(max(0, filesize - 65536), 0)
-                for x in range(65536 // bytesize):
-                    buffer = f.read(bytesize)
-                    (l_value,) = struct.unpack(longlongformat, buffer)
-                    hash_value += l_value
-                    hash_value = hash_value & 0xFFFFFFFFFFFFFFFF
-                    
-            return "%016x" % hash_value
-        except Exception as e:
-            print(f"Error calculating hash for {filepath}: {e}")
-            return ""
+        """Wrapper for shared hash calculation."""
+        from core.utils import calculate_file_hash
+        return calculate_file_hash(filepath)
+
+    def _get_headers(self) -> Dict[str, str]:
+        headers = {
+            "Api-Key": self.api_key,
+            "User-Agent": self.user_agent,
+            "Content-Type": "application/json"
+        }
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        return headers
 
     def search(self, filepath: str, language: str = "en") -> List[SubtitleInfo]:
         if not self.is_configured:
@@ -93,11 +128,6 @@ class OpenSubtitlesProvider(ISubtitleProvider):
         print(f"DEBUG: Searching subtitles for {filename} (Hash: {moviehash})")
         
         import requests
-        headers = {
-            "Api-Key": self.api_key,
-            "User-Agent": self.user_agent,
-            "Content-Type": "application/json"
-        }
         
         params = {
             "languages": language,
@@ -110,7 +140,7 @@ class OpenSubtitlesProvider(ISubtitleProvider):
         try:
             response = requests.get(
                 f"{self.base_url}/subtitles",
-                headers=headers,
+                headers=self._get_headers(),
                 params=params,
                 timeout=10
             )
@@ -120,23 +150,15 @@ class OpenSubtitlesProvider(ISubtitleProvider):
             results = []
             for item in data.get("data", []):
                 attrs = item.get("attributes", {})
-                
-                # Check if this result matched via hash
-                # The API typically returns "moviehash_match": true in the response or related logs,
-                # but we can infer or trust the ranking. simpler to just store what we get.
-                # Actually OpenSubtitles returns "moviehash_match" boolean inside attributes usually?
-                # Let's check documentation or assume false for now, but prioritize in UI if needed.
-                # Just mapping fields for now.
-                
                 files = attrs.get("files", [])
-                file_id = files[0].get("file_id") if files else item.get("id") # Prefer file_id for download
+                file_id = files[0].get("file_id") if files else item.get("id")
                 
                 results.append(SubtitleInfo(
-                    id=str(file_id), # Use file_id for download endpoint usually
+                    id=str(file_id),
                     language=attrs.get("language", language),
                     format=attrs.get("format", "srt"),
                     download_count=attrs.get("download_count", 0),
-                    score=attrs.get("ratings", 0.0), # Simplification
+                    score=attrs.get("ratings", 0.0),
                     filename=files[0].get("file_name") if files else "Unknown",
                     is_hash_match=moviehash and attrs.get("moviehash_match", False) 
                 ))
@@ -149,42 +171,52 @@ class OpenSubtitlesProvider(ISubtitleProvider):
             print(f"Error searching subtitles: {e}")
             return []
 
-    def download(self, file_id: str) -> Optional[dict]:
+    def download(self, file_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         """
         Get download link. 
-        Note: The /download endpoint might require a separate POST request.
         """
         if not self.is_configured:
-            return None
+            return None, "Provider not configured"
             
         import requests
-        headers = {
-            "Api-Key": self.api_key,
-            "User-Agent": self.user_agent,
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
         
         try:
-            # Need to POST to /download to get the temporary link
             payload = {"file_id": int(file_id)}
             response = requests.post(
                 f"{self.base_url}/download",
-                headers=headers,
+                headers=self._get_headers(),
                 json=payload,
                 timeout=10
             )
+            
+            if response.status_code in [406, 429]:
+                 data = response.json()
+                 msg = data.get("message", "Quota exceeded")
+                 return None, msg
+
             response.raise_for_status()
-            return response.json() # Should contain "link"
+            return response.json(), None
         except Exception as e:
             print(f"Error requesting download link: {e}")
-            return None
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    err_data = e.response.json()
+                    return None, err_data.get("message", str(e))
+                except:
+                    pass
+            return None, str(e)
 
 # Singleton
-_provider_instance: Optional[OpenSubtitlesProvider] = None
+_opensubtitles_instance: Optional[OpenSubtitlesProvider] = None
 
 def get_subtitle_provider() -> OpenSubtitlesProvider:
-    global _provider_instance
-    if _provider_instance is None:
-        _provider_instance = OpenSubtitlesProvider()
-    return _provider_instance
+    global _opensubtitles_instance
+    if _opensubtitles_instance is None:
+        _opensubtitles_instance = OpenSubtitlesProvider()
+    return _opensubtitles_instance
+
+def get_all_providers() -> List[ISubtitleProvider]:
+    """Returns all available subtitle providers."""
+    # from core.providers.subdb_provider import SubDBProvider
+    # SubDB is currently down/unreliable. Disabled to rely on OpenSubtitles Auth.
+    return [get_subtitle_provider()]

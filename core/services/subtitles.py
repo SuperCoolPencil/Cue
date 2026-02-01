@@ -4,7 +4,7 @@ import subprocess
 import requests
 from typing import List, Tuple, Optional
 from core.domain import Session
-from core.providers.subtitle_provider import get_subtitle_provider, SubtitleInfo
+from core.providers.subtitle_provider import get_subtitle_provider, get_all_providers, SubtitleInfo
 
 class SubtitleService:
     """
@@ -13,10 +13,6 @@ class SubtitleService:
     
     def search_subtitles(self, session: Session, series_files: List[str] = None) -> List[SubtitleInfo]:
         """Search for subtitles for the current file."""
-        provider = get_subtitle_provider()
-        if not provider.is_configured:
-            return []
-            
         # Determine actual file path (helper for series)
         filepath = session.filepath
         if series_files and session.playback.last_played_index < len(series_files):
@@ -25,7 +21,19 @@ class SubtitleService:
         if not os.path.exists(filepath):
             return []
             
-        return provider.search(filepath)
+        # Query all providers
+        print(f"DEBUG: Searching subtitles for {os.path.basename(filepath)}...")
+        all_results = []
+        for provider in get_all_providers():
+            if provider.is_configured:
+                try:
+                    all_results.extend(provider.search(filepath))
+                except Exception as e:
+                    print(f"Error searching provider {type(provider).__name__}: {e}")
+                    
+        # Sort by hash match (True first), then download count (desc)
+        all_results.sort(key=lambda x: (x.is_hash_match, x.download_count), reverse=True)
+        return all_results
 
     def _download_to_path(self, download_url: str, filepath: str) -> Tuple[bool, str]:
         """Helper to download a subtitle URL to the correct location for a video file."""
@@ -55,31 +63,49 @@ class SubtitleService:
         """
         Automatically finds and downloads the best subtitle for a specific file.
         """
-        provider = get_subtitle_provider()
-        if not provider.is_configured:
-            return False, "Provider not configured"
-            
-        # 1. Search
-        results = provider.search(filepath)
-        if not results:
+        # 0. Check if exists
+        media_dir = os.path.dirname(filepath)
+        media_name = os.path.splitext(os.path.basename(filepath))[0]
+        sub_path = os.path.join(media_dir, ".subs", f"{media_name}.srt")
+        if os.path.exists(sub_path):
+            return True, "Subtitle already exists"
+
+        # 1. Search (uses all providers)
+        results = self.search_subtitles(Session(filepath, None, None), series_files=[filepath]) # Hacky session reconstruction or specialized search
+        # Better: use helper search method logic without full session if needed, 
+        # but self.search_subtitles requires session.
+        # Let's just call providers directly or refactor search_subtitles.
+        # Actually search_subtitles takes session just for filepath logic.
+        # Let's refactor search_subtitles to take filepath optional?
+        # For now, let's just duplicate the loop or construct a dummy session.
+        # Duplicate loop is cleaner for now.
+        
+        provider_results = []
+        for provider in get_all_providers():
+            if provider.is_configured:
+                 try:
+                    provider_results.extend(provider.search(filepath))
+                 except: pass
+                 
+        if not provider_results:
             return False, "No subtitles found"
             
-        # 2. Pick Best (already sorted by hash match then download count)
-        best_sub = results[0]
+        # Sort: Hash matches first
+        provider_results.sort(key=lambda x: (x.is_hash_match, x.download_count), reverse=True)
+        best_sub = provider_results[0]
         
-        # 3. Get Link
-        data = provider.download(best_sub.id)
-        if not data or 'link' not in data:
-            return False, "Failed to get download link"
-            
-        # 4. Download
-        return self._download_to_path(data['link'], filepath)
+        return self.download_subtitle(Session(filepath, None, None), best_sub.id, series_files=[filepath])
 
-    def batch_download_subtitles(self, session: Session, series_files: List[str] = None) -> Tuple[int, int, List[str]]:
+    def batch_download_subtitles(self, session: Session, series_files: List[str] = None, on_progress=None) -> Tuple[int, int, List[str]]:
         """
         Downloads and syncs subtitles for all files in a session (folder).
         Returns: (success_count, fail_count, logs)
         """
+        def log(msg):
+            logs.append(msg)
+            if on_progress:
+                on_progress(msg)
+
         files_to_process = series_files
         if not files_to_process:
             # Maybe it's a single file session
@@ -94,22 +120,22 @@ class SubtitleService:
         
         for filepath in files_to_process:
             filename = os.path.basename(filepath)
-            logs.append(f"Processing: {filename}")
+            log(f"Processing: {filename}")
             
             # 1. Download
             ok, msg = self.download_best_subtitle(filepath)
             if not ok:
-                logs.append(f"  ❌ Download failed: {msg}")
+                log(f"  ❌ Download failed: {msg}")
                 fail_count += 1
                 continue
-            logs.append(f"  ✅ {msg}")
+            log(f"  ✅ {msg}")
             
             # 2. Sync
             ok_sync, msg_sync = self._sync_single_file(filepath)
             if ok_sync:
-                logs.append(f"  ✅ Synced")
+                log(f"  ✅ Synced")
             else:
-                logs.append(f"  ⚠️ Sync skipped/failed: {msg_sync}")
+                log(f"  ⚠️ Sync skipped/failed: {msg_sync}")
                 
             success_count += 1
             
@@ -140,12 +166,27 @@ class SubtitleService:
         Download a subtitle and save it into a .subs folder next to the media file.
         Returns: (Success, Message)
         """
-        provider = get_subtitle_provider()
-        if not provider.is_configured:
-            return False, "Provider not configured"
+        # Determine provider based on ID
+        selected_provider = None
+        
+        if subtitle_id.startswith("subdb:"):
+            # Find SubDB provider
+            for p in get_all_providers():
+                if "SubDBProvider" in str(type(p)):
+                    selected_provider = p
+                    break
+        else:
+            # Assume OpenSubtitles (default)
+            selected_provider = get_subtitle_provider()
+            
+        if not selected_provider or not selected_provider.is_configured:
+            return False, "Provider not configured or found"
             
         # Get download link
-        data = provider.download(subtitle_id)
+        data, error = selected_provider.download(subtitle_id)
+        if error:
+            return False, f"Download failed: {error}"
+            
         if not data or 'link' not in data:
             return False, "Failed to get download link"
             

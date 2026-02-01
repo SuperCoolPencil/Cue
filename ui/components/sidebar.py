@@ -67,6 +67,40 @@ def render_sidebar(settings, current_page):
                 st.session_state['context_reload_needed'] = True
                 st.rerun()
         
+        # OpenSubtitles Account
+        from core.providers.subtitle_provider import get_subtitle_provider
+        
+        with st.expander("OpenSubtitles Account"):
+            provider = get_subtitle_provider()
+            
+            if provider.token:
+                user = provider.user_info or {}
+                st.write(f"Logged in as: **{user.get('username', 'Unknown')}**")
+                # User info usually has 'level' or 'vip' boolean. OpenSubtitles user info structure varies.
+                # Just show what we generally have or generic message.
+                if isinstance(user, dict):
+                     level = user.get('level', 'Free')
+                     st.caption(f"Status: {level}")
+                
+                if st.button("Logout", use_container_width=True):
+                    provider.logout()
+                    st.rerun()
+            else:
+                st.caption("Login to increase download limits.")
+                username = st.text_input("Username", key="os_user")
+                password = st.text_input("Password", type="password", key="os_pass")
+                
+                if st.button("Login", use_container_width=True):
+                    if not username or not password:
+                        st.error("Missing credentials")
+                    else:
+                        success, msg = provider.login(username, password)
+                        if success:
+                            st.success("Logged in!")
+                            st.rerun()
+                        else:
+                            st.error(msg)
+        
         # Open config in default editor
         if st.button("Open Config", use_container_width=True):
             config_path = pathlib.Path(__file__).parent.parent.parent / "core" / "config.py"

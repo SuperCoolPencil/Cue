@@ -58,9 +58,10 @@ def edit_metadata_dialog():
     if os.path.isdir(path):
         if st.button("⚡ Batch Auto-Download & Sync (All Episodes)", key=f"batch_subs_{session_id}", use_container_width=True):
              with st.status("Processing batch subtitles...", expanded=True) as status:
-                success, fail, logs = library_service.batch_download_subtitles(session)
-                for log in logs:
-                    st.write(log)
+                def update_log(msg):
+                    st.write(msg)
+                    
+                success, fail, logs = library_service.batch_download_subtitles(session, on_progress=update_log)
                 
                 if fail == 0:
                     status.update(label=f"Completed! Downloaded {success} subtitles.", state="complete", expanded=False)

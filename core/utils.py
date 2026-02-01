@@ -1,8 +1,45 @@
 import os
 import math
+import struct
 import subprocess
 import json
 from typing import List, Optional
+
+def calculate_file_hash(filepath: str) -> str:
+    """
+    Calculate 64k moviehash (used by OpenSubtitles and SubDB).
+    Based on: https://trac.opensubtitles.org/projects/opensubtitles/wiki/HashSourceCodes
+    """
+    try:
+        longlongformat = '<q'  # little-endian long long
+        bytesize = struct.calcsize(longlongformat)
+        
+        with open(filepath, "rb") as f:
+            filesize = os.path.getsize(filepath)
+            hash_value = filesize
+            
+            if filesize < 65536 * 2:
+                return ""
+            
+            # Read first 64k
+            for x in range(65536 // bytesize):
+                buffer = f.read(bytesize)
+                (l_value,) = struct.unpack(longlongformat, buffer)
+                hash_value += l_value
+                hash_value = hash_value & 0xFFFFFFFFFFFFFFFF
+            
+            # Read last 64k
+            f.seek(max(0, filesize - 65536), 0)
+            for x in range(65536 // bytesize):
+                buffer = f.read(bytesize)
+                (l_value,) = struct.unpack(longlongformat, buffer)
+                hash_value += l_value
+                hash_value = hash_value & 0xFFFFFFFFFFFFFFFF
+                
+        return "%016x" % hash_value
+    except Exception as e:
+        print(f"Error calculating hash for {filepath}: {e}")
+        return ""
 
 def get_media_duration(filepath: str) -> float:
     """
