@@ -74,6 +74,15 @@ def edit_metadata_dialog():
         if st.button("Search Subs", key="modal_search_subs", use_container_width=True):
             st.session_state['show_subtitle_modal'] = True
             st.rerun()
+            
+    # Sync button
+    if st.button("🔄 Sync Subtitles (ffsync)", key="modal_sync_subs", use_container_width=True, help="Run ffsync on all subtitles in the folder"):
+        with st.spinner("Syncing subtitles... (this may take a minute)"):
+            success, msg = library_service.sync_subtitles(session)
+            if success:
+                st.success(msg)
+            else:
+                st.error(msg)
 
     # Subtitle Modal logic (nested inside this dialog for simplicity, or separate)
     if st.session_state.get('show_subtitle_modal'):
@@ -128,10 +137,11 @@ def edit_metadata_dialog():
         st.session_state.pop('edit_modal_session', None)
         st.rerun()
 
-@st.dialog("Subtitle Search")
+# @st.dialog("Subtitle Search") <- Removed to allow embedding
 def subtitle_modal(session, library_service):
     """Modal specifically for searching and downloading subtitles"""
     
+    st.markdown("### Subtitle Search")
     st.write(f"Searching subtitles for: **{session.metadata.clean_title}**")
     
     # Check API Key

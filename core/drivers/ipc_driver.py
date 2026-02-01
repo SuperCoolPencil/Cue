@@ -113,6 +113,7 @@ class PlayerDriver(IPlayerDriver):
                 "--new-window",
                 f"--mpv-input-ipc-server={socket_path}",
                 "--mpv-idle=yes",
+                "--mpv-sub-file-paths=.subs",
                 "--mpv-pause"
             ]
         else:
@@ -121,6 +122,7 @@ class PlayerDriver(IPlayerDriver):
                 "--no-terminal",
                 f"--input-ipc-server={socket_path}",
                 "--idle=yes",
+                "--sub-file-paths=.subs",
                 "--pause"
             ]
             

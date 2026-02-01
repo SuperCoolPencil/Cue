@@ -1,6 +1,5 @@
 """Metadata provider interface and TMDB implementation for fetching movie/TV metadata."""
 import os
-import requests
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional, List
@@ -85,6 +84,7 @@ class TMDBProvider(IMetadataProvider):
             print("DEBUG TMDBProvider._get: API key not configured, skipping request")
             return None, "TMDB API key not configured"
         
+        import requests
         import time
         max_retries = 3
         last_error = None

@@ -33,6 +33,7 @@ class MpvDriver(IPlayerDriver):
             f"--playlist-start={start_index}",
             "--idle=no",
             "--pause",  # 1. Start paused
+            "--sub-file-paths=.subs", # Look for subtitles in .subs folder
         ]
         command.extend(playlist)
 

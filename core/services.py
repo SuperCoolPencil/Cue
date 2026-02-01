@@ -527,7 +527,7 @@ class LibraryService:
 
     def download_subtitle(self, session: Session, subtitle_id: str) -> Tuple[bool, str]:
         """
-        Download a subtitle and save it next to the media file.
+        Download a subtitle and save it into a .subs folder next to the media file.
         Returns: (Success, Message)
         """
         from core.providers.subtitle_provider import get_subtitle_provider
@@ -543,7 +543,6 @@ class LibraryService:
             return False, "Failed to get download link"
             
         download_url = data['link']
-        filename = data.get('file_name', 'subtitle.srt')
         
         # Determine target path
         filepath = session.filepath
@@ -554,9 +553,12 @@ class LibraryService:
         media_dir = os.path.dirname(filepath)
         media_name = os.path.splitext(os.path.basename(filepath))[0]
         
-        # Save as [media_name].srt (standard for players)
-        # If multiple languages, might want .en.srt etc, but keeping simple for now
-        target_path = os.path.join(media_dir, f"{media_name}.srt")
+        # Create .subs directory if it doesn't exist
+        subs_dir = os.path.join(media_dir, ".subs")
+        os.makedirs(subs_dir, exist_ok=True)
+        
+        # Save as .subs/[media_name].srt
+        target_path = os.path.join(subs_dir, f"{media_name}.srt")
         
         try:
             print(f"Downloading subtitle to {target_path}...")
@@ -566,7 +568,64 @@ class LibraryService:
             with open(target_path, 'wb') as f:
                 f.write(r.content)
                 
-            return True, f"Downloaded to {os.path.basename(target_path)}"
+            return True, f"Downloaded to .subs/{os.path.basename(target_path)}"
         except Exception as e:
             return False, f"Download failed: {str(e)}"
+
+    def sync_subtitles(self, session: Session) -> Tuple[bool, str]:
+        """
+        Run ffsubsync on the current file's subtitle.
+        """
+        import shutil
+        import subprocess
+        
+        # Check if ffsubsync is installed
+        if not shutil.which("ffsubsync"):
+            return False, "ffsubsync not found. Please install it: 'pip install ffsubsync'"
+            
+        # Determine target path
+        filepath = session.filepath
+        series_files = self.get_series_files(session)
+        
+        # If it's a folder/series, we might want to sync ALL files?
+        # For now, let's sync the CURRENT file to be safe and fast.
+        # User request said "use it on every file in folder", so let's try to loop if it's a series.
+        
+        files_to_sync = []
+        if series_files:
+            files_to_sync = series_files
+        else:
+            files_to_sync = [filepath]
+            
+        success_count = 0
+        error_count = 0
+        
+        for video_path in files_to_sync:
+            media_dir = os.path.dirname(video_path)
+            media_name = os.path.splitext(os.path.basename(video_path))[0]
+            subs_dir = os.path.join(media_dir, ".subs")
+            sub_path = os.path.join(subs_dir, f"{media_name}.srt")
+            
+            if not os.path.exists(sub_path):
+                continue
+                
+            try:
+                print(f"Syncing subtitle for {video_path}...")
+                # ffsubsync [video] -i [sub] -o [sub]
+                cmd = ["ffsubsync", video_path, "-i", sub_path, "-o", sub_path]
+                subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                success_count += 1
+            except subprocess.CalledProcessError as e:
+                print(f"Error syncing {media_name}: {e}")
+                error_count += 1
+            except Exception as e:
+                print(f"Unexpected error syncing {media_name}: {e}")
+                error_count += 1
+                
+        if success_count == 0 and error_count == 0:
+            return False, "No subtitles found to sync"
+        elif error_count > 0:
+            return True, f"Synced {success_count} files, {error_count} failed"
+        else:
+            return True, f"Successfully synced {success_count} subtitles"
 
