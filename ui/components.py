@@ -29,14 +29,14 @@ def edit_metadata_dialog():
     library_service = modal_data['library_service']
     
     # Title input
-    new_title = st.text_input("Title", value=display_name, key="modal_title")
+    new_title = st.text_input("Title", value=display_name, key=f"modal_title_{session_id}")
     
     # Season number
     new_season = st.number_input(
         "Season Number", 
         min_value=1, 
         value=current_season if current_season is not None else 1, 
-        key="modal_season"
+        key=f"modal_season_{session_id}"
     )
     
     # Save and Refresh buttons
@@ -97,7 +97,7 @@ def edit_metadata_dialog():
     new_tmdb_id = st.text_input(
         "TMDB ID", 
         value=str(current_tmdb_id) if current_tmdb_id else "",
-        key="modal_tmdb_id",
+        key=f"modal_tmdb_id_{session_id}",
         placeholder="e.g., 550 for Fight Club"
     )
     
