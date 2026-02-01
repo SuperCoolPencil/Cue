@@ -1,7 +1,11 @@
 import os
 import streamlit as st
 from core.app_context import app
-from ui.components import render_sidebar, render_card, render_stats_page, edit_metadata_dialog, render_archived_page
+from ui.components.sidebar import render_sidebar
+from ui.components.cards import render_card
+from ui.components.dialogs import edit_metadata_dialog
+from ui.views.stats import render_stats_page
+from ui.views.archived import render_archived_page
 
 # === INITIALIZATION ===
 def load_css(file_name=os.path.join(os.path.abspath(os.path.dirname(__file__)), "styles.css")):
