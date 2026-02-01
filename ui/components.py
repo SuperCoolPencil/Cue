@@ -65,6 +65,19 @@ def edit_metadata_dialog():
     # Subtitles Section
     st.markdown("**Subtitles**")
     
+    # Batch Download for Series (Folders)
+    if os.path.isdir(path):
+        if st.button("⚡ Batch Auto-Download & Sync (All Episodes)", key=f"batch_subs_{session_id}", use_container_width=True):
+             with st.status("Processing batch subtitles...", expanded=True) as status:
+                success, fail, logs = library_service.batch_download_subtitles(session)
+                for log in logs:
+                    st.write(log)
+                
+                if fail == 0:
+                    status.update(label=f"Completed! Downloaded {success} subtitles.", state="complete", expanded=False)
+                else:
+                    status.update(label=f"Finished with {fail} errors. Downloaded {success}.", state="error")
+    
     col_sub1, col_sub2 = st.columns([0.7, 0.3])
     
     with col_sub1:

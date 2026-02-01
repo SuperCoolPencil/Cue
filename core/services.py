@@ -525,6 +525,124 @@ class LibraryService:
             
         return provider.search(filepath)
 
+    def _download_to_path(self, download_url: str, filepath: str) -> Tuple[bool, str]:
+        """Helper to download a subtitle URL to the correct location for a video file."""
+        import requests
+        
+        media_dir = os.path.dirname(filepath)
+        media_name = os.path.splitext(os.path.basename(filepath))[0]
+        
+        # Create .subs directory if it doesn't exist
+        subs_dir = os.path.join(media_dir, ".subs")
+        os.makedirs(subs_dir, exist_ok=True)
+        
+        # Save as .subs/[media_name].srt
+        target_path = os.path.join(subs_dir, f"{media_name}.srt")
+        
+        try:
+            print(f"Downloading subtitle to {target_path}...")
+            r = requests.get(download_url)
+            r.raise_for_status()
+            
+            with open(target_path, 'wb') as f:
+                f.write(r.content)
+                
+            return True, f"Downloaded to .subs/{os.path.basename(target_path)}"
+        except Exception as e:
+            return False, f"Download failed: {str(e)}"
+    
+    def download_best_subtitle(self, filepath: str) -> Tuple[bool, str]:
+        """
+        Automatically finds and downloads the best subtitle for a specific file.
+        """
+        from core.providers.subtitle_provider import get_subtitle_provider
+        
+        provider = get_subtitle_provider()
+        if not provider.is_configured:
+            return False, "Provider not configured"
+            
+        # 1. Search
+        results = provider.search(filepath)
+        if not results:
+            return False, "No subtitles found"
+            
+        # 2. Pick Best (already sorted by hash match then download count)
+        best_sub = results[0]
+        
+        # 3. Get Link
+        data = provider.download(best_sub.id)
+        if not data or 'link' not in data:
+            return False, "Failed to get download link"
+            
+        # 4. Download
+        return self._download_to_path(data['link'], filepath)
+
+    def batch_download_subtitles(self, session: Session) -> Tuple[int, int, List[str]]:
+        """
+        Downloads and syncs subtitles for all files in a session (folder).
+        Returns: (success_count, fail_count, logs)
+        """
+        files_to_process = self.get_series_files(session)
+        if not files_to_process:
+            # Maybe it's a single file session
+            if os.path.exists(session.filepath) and os.path.isfile(session.filepath):
+                files_to_process = [session.filepath]
+            else:
+                return 0, 0, ["No files found to process"]
+        
+        success_count = 0
+        fail_count = 0
+        logs = []
+        
+        for filepath in files_to_process:
+            filename = os.path.basename(filepath)
+            logs.append(f"Processing: {filename}")
+            
+            # 1. Download
+            ok, msg = self.download_best_subtitle(filepath)
+            if not ok:
+                logs.append(f"  ❌ Download failed: {msg}")
+                fail_count += 1
+                continue
+            logs.append(f"  ✅ {msg}")
+            
+            # 2. Sync
+            # We reuse existing sync logic but we need to target specific file
+            # Since sync_subtitles iterates, we can just call internal logic or simplified version
+            # Let's call a helper or simplified sync for single file
+            ok_sync, msg_sync = self._sync_single_file(filepath)
+            if ok_sync:
+                logs.append(f"  ✅ Synced")
+            else:
+                logs.append(f"  ⚠️ Sync skipped/failed: {msg_sync}")
+                
+            success_count += 1
+            
+        return success_count, fail_count, logs
+
+    def _sync_single_file(self, video_path: str) -> Tuple[bool, str]:
+        """Runs ffsubsync on a single video file's subtitle."""
+        import shutil
+        import subprocess
+        
+        if not shutil.which("ffsubsync"):
+            return False, "ffsubsync missing"
+            
+        media_dir = os.path.dirname(video_path)
+        media_name = os.path.splitext(os.path.basename(video_path))[0]
+        subs_dir = os.path.join(media_dir, ".subs")
+        sub_path = os.path.join(subs_dir, f"{media_name}.srt")
+        
+        if not os.path.exists(sub_path):
+            return False, "No subtitle file found"
+            
+        try:
+            cmd = ["ffsubsync", video_path, "-i", sub_path, "-o", sub_path]
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return True, "Synced"
+        except Exception as e:
+            return False, str(e)
+
     def download_subtitle(self, session: Session, subtitle_id: str) -> Tuple[bool, str]:
         """
         Download a subtitle and save it into a .subs folder next to the media file.
@@ -550,27 +668,7 @@ class LibraryService:
         if series_files and session.playback.last_played_index < len(series_files):
             filepath = series_files[session.playback.last_played_index]
             
-        media_dir = os.path.dirname(filepath)
-        media_name = os.path.splitext(os.path.basename(filepath))[0]
-        
-        # Create .subs directory if it doesn't exist
-        subs_dir = os.path.join(media_dir, ".subs")
-        os.makedirs(subs_dir, exist_ok=True)
-        
-        # Save as .subs/[media_name].srt
-        target_path = os.path.join(subs_dir, f"{media_name}.srt")
-        
-        try:
-            print(f"Downloading subtitle to {target_path}...")
-            r = requests.get(download_url)
-            r.raise_for_status()
-            
-            with open(target_path, 'wb') as f:
-                f.write(r.content)
-                
-            return True, f"Downloaded to .subs/{os.path.basename(target_path)}"
-        except Exception as e:
-            return False, f"Download failed: {str(e)}"
+        return self._download_to_path(download_url, filepath)
 
     def sync_subtitles(self, session: Session) -> Tuple[bool, str]:
         """
