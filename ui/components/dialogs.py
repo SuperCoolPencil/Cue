@@ -2,6 +2,7 @@ import os
 import streamlit as st
 import time
 
+@st.dialog("Edit Metadata")
 def edit_metadata_dialog():
     """Modal dialog for editing session metadata."""
     modal_data = st.session_state.get('edit_modal_session')
